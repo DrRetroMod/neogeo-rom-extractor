@@ -10,6 +10,32 @@ This project is in active development.
 
 Supported games are added through individual game modules in the `game_modules/` folder. Each module defines the source layout, expected file slices, output names, hashes, and any game-specific extraction behaviour required for that title.
 
+## Currently Supported Games
+
+The following game modules are currently included:
+
+- Alpha Mission II
+- Art of Fighting 3
+- Crossed Swords
+- Ghost Pilots
+- King of the Monsters 2
+- Last Blade 2
+- Last Resort
+- Magician Lord
+- Mutation Nation
+- Ninja Commando
+- Ninja Master's
+- Over Top
+- Robo Army
+- Samurai Shodown IV
+- Sengoku
+- Sengoku 2
+- Soccer Brawl
+- Super Sidekicks
+- The Super Spy
+- Three Count Bout
+- Top Hunter
+
 ## Features
 
 - Modular per-game extraction system
@@ -19,18 +45,6 @@ Supported games are added through individual game modules in the `game_modules/`
 - Output ZIP creation for supported Neo Geo titles
 - Designed for preservation and personal-use extraction workflows
 - No ROMs, BIOS files, or copyrighted game assets included
-
-## Legal Notice
-
-This project does **not** include, distribute, download, or provide access to ROMs, BIOS files, game executables, game data, or any other copyrighted assets.
-
-You must provide your own legally obtained source files.
-
-This tool is intended for users who own the relevant games and want to extract their own local copies for personal use, preservation, backup, or emulator compatibility.
-
-Do not use this project to obtain, distribute, or share copyrighted game data that you do not have the legal right to use.
-
-The author does not endorse piracy or copyright infringement.
 
 ## Supported Sources
 
@@ -174,3 +188,15 @@ Do not submit ROMs, BIOS files, copyrighted game data, or proprietary assets.
 ```text
 neogeo neo-geo snk rom-extractor rom-extraction game-preservation digital-preservation python emulation-tools arcade retro-gaming mame
 ```
+
+## Legal Notice
+
+This project does **not** include, distribute, download, or provide access to ROMs, BIOS files, game executables, game data, or any other copyrighted assets.
+
+You must provide your own legally obtained source files.
+
+This tool is intended for users who own the relevant games and want to extract their own local copies for personal use, preservation, backup, or emulator compatibility.
+
+Do not use this project to obtain, distribute, or share copyrighted game data that you do not have the legal right to use.
+
+The author does not endorse piracy or copyright infringement.
