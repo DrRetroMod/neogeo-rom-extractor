@@ -118,7 +118,7 @@ Examples of game-specific data include:
 - source filenames
 - ROM slice offsets
 - expected CRC32 values
-- expected SHA-256 values, where used
+- expected SHA1 values
 - output ROM names
 - patch rules
 - game-specific quirks

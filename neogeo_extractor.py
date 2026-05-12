@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 # NeoGeo ROM Extractor
 # Copyright (C) 2026 Dr. RetroMod
 #
@@ -75,6 +76,7 @@ import argparse
 import binascii
 import hashlib
 import importlib.util
+import json
 import shutil
 import zipfile
 from dataclasses import dataclass
@@ -91,6 +93,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SCAN_ROOT = SCRIPT_DIR.parent
 
 MODULES_DIR = SCRIPT_DIR / "game_modules"
+PATCH_DATA_DIR = MODULES_DIR / "patch_data"
 TEMP_DIR = SCRIPT_DIR / "temp"
 OUTPUT_DIR = SCRIPT_DIR / "extracted_neogeo"
 
@@ -203,6 +206,7 @@ def sanitize_folder_name(value: str) -> str:
 
 def ensure_base_folders() -> None:
     MODULES_DIR.mkdir(exist_ok=True)
+    PATCH_DATA_DIR.mkdir(exist_ok=True)
     TEMP_DIR.mkdir(exist_ok=True)
     OUTPUT_DIR.mkdir(exist_ok=True)
     BACKUPS_DIR.mkdir(exist_ok=True)
@@ -437,6 +441,7 @@ def calculate_required_source_sizes(game: dict[str, Any]) -> dict[str, int]:
                 "find_slice_by_crc32",
                 "dotemu_sfix_reencode",
                 "dotemu_tiles_reencode",
+                "apply_byte_patches_from_json",
             }:
                 continue
 
@@ -1180,6 +1185,81 @@ def run_conditional_slice_operation(
         f"for {source_path}"
     )
 
+def load_patch_json(patch_file: str) -> list[dict[str, int]]:
+    patch_path = PATCH_DATA_DIR / patch_file
+
+    if not patch_path.is_file():
+        raise FileNotFoundError(f"Patch JSON file not found: {patch_path}")
+
+    with patch_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    if isinstance(data, list):
+        patches = data
+    elif isinstance(data, dict):
+        patches = data.get("patches")
+    else:
+        raise ValueError(f"Patch JSON must be a list or object: {patch_path}")
+
+    if not isinstance(patches, list):
+        raise ValueError(f"Patch JSON has no valid patches list: {patch_path}")
+
+    return patches
+
+
+def run_apply_byte_patches_from_json_operation(
+    data: bytes,
+    operation: dict[str, Any],
+    log: list[str],
+) -> bytes:
+    patch_file = str(operation["patch_file"])
+    patches = load_patch_json(patch_file)
+
+    patched = bytearray(data)
+
+    log.append("  Operation: apply_byte_patches_from_json")
+    log.append(f"    Patch file:  {patch_file}")
+    log.append(f"    Patch count: {len(patches)}")
+
+    for index, patch in enumerate(patches, start=1):
+        offset = int(patch["offset"])
+        expected_old = int(patch["old"])
+        new_value = int(patch["new"])
+
+        if offset < 0 or offset >= len(patched):
+            raise ValueError(
+                f"Patch {index} offset out of range: "
+                f"offset={offset}, file size={len(patched)}"
+            )
+
+        if expected_old < 0 or expected_old > 0xFF:
+            raise ValueError(f"Patch {index} old value is not a byte: {expected_old}")
+
+        if new_value < 0 or new_value > 0xFF:
+            raise ValueError(f"Patch {index} new value is not a byte: {new_value}")
+
+        actual_old = patched[offset]
+
+        if actual_old != expected_old:
+            raise ValueError(
+                f"Patch {index} refused at offset 0x{offset:08X}: "
+                f"expected old 0x{expected_old:02X}, got 0x{actual_old:02X}, "
+                f"wanted new 0x{new_value:02X}"
+            )
+
+        patched[offset] = new_value
+
+        if index <= 10 or index == len(patches):
+            log.append(
+                f"    Patch {index}: "
+                f"offset=0x{offset:08X}, "
+                f"old=0x{expected_old:02X}, "
+                f"new=0x{new_value:02X}"
+            )
+        elif index == 11:
+            log.append("    ...")
+
+    return bytes(patched)
 
 def dotemu_sfix_reencode_source_bytes(data: bytes) -> bytes:
     """
@@ -1498,6 +1578,10 @@ def build_streams_for_file(
             # Direct Dotemu tile files are handled elsewhere.
             continue
 
+        elif op_type == "apply_byte_patches_from_json":
+            # Direct byte patches are handled by build_file_data after source bytes are produced.
+            continue
+
         elif op_type == "assemble_chunks":
             # Assembly is handled later once all streams are known.
             continue
@@ -1605,6 +1689,34 @@ def build_file_data(
 ) -> bytes:
     operations = file_entry["operations"]
     operation_types = [str(operation["type"]) for operation in operations]
+
+    if "apply_byte_patches_from_json" in operation_types:
+        if operation_types.count("apply_byte_patches_from_json") != 1:
+            raise ValueError(
+                "Only one apply_byte_patches_from_json operation is supported per file"
+            )
+
+        patch_operation = next(
+            operation for operation in operations
+            if operation["type"] == "apply_byte_patches_from_json"
+        )
+
+        producer_operations = [
+            operation
+            for operation in operations
+            if operation["type"] != "apply_byte_patches_from_json"
+        ]
+
+        producer_file_entry = dict(file_entry)
+        producer_file_entry["operations"] = producer_operations
+
+        data = build_file_data(source_folder, producer_file_entry, log)
+
+        return run_apply_byte_patches_from_json_operation(
+            data,
+            patch_operation,
+            log,
+        )
 
     if operation_types.count("slice") == 1 and "assemble_chunks" not in operation_types:
         slice_operation = next(
