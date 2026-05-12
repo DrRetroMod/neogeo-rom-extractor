@@ -14,14 +14,17 @@ Supported games are added through individual game modules in the `game_modules/`
 
 The following game modules are currently included:
 
+- 3 Count Bout
 - Alpha Mission II
 - Art of Fighting 3
 - Crossed Swords
 - Ghost Pilots
 - King of the Monsters 2
-- Last Blade 2
 - Last Resort
 - Magician Lord
+- Metal Slug
+- Metal Slug 2
+- Metal Slug X
 - Mutation Nation
 - Ninja Commando
 - Ninja Master's
@@ -32,9 +35,11 @@ The following game modules are currently included:
 - Sengoku 2
 - Soccer Brawl
 - Super Sidekicks
+- The Last Blade
+- The Last Blade 2
 - The Super Spy
-- Three Count Bout
 - Top Hunter
+- Twinkle Star Sprites
 
 ## Features
 

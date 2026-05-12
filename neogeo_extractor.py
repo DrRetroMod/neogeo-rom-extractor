@@ -60,6 +60,8 @@ This version supports:
 - generic NeoGeo 4bpp tile decode operations
 - conditional_slice operations
 - find_slice_by_crc32 operations
+- Dotemu SFIX re-encode operations
+- Dotemu tile re-encode operations
 - assemble_chunks operations
 - CRC32 + SHA1 validation
 - normal compressed ZIP creation
@@ -433,6 +435,8 @@ def calculate_required_source_sizes(game: dict[str, Any]) -> dict[str, int]:
                 "assemble_chunks",
                 "patch_if_needed",
                 "find_slice_by_crc32",
+                "dotemu_sfix_reencode",
+                "dotemu_tiles_reencode",
             }:
                 continue
 
@@ -1177,6 +1181,196 @@ def run_conditional_slice_operation(
     )
 
 
+def dotemu_sfix_reencode_source_bytes(data: bytes) -> bytes:
+    """
+    Re-encode Dotemu SFIX/source text-layer data into NeoGeo SFIX layout.
+
+    Dotemu stores each 32-byte block in a different byte order. This converts
+    each 32-byte block into the MAME/NeoGeo expected order.
+    """
+    if len(data) % 32 != 0:
+        raise ValueError(
+            f"Dotemu SFIX source size must be divisible by 32, got {len(data)}"
+        )
+
+    output = bytearray()
+    buffer = bytearray(32)
+
+    for i in range(0, len(data), 32):
+        for j in range(0, 8):
+            buffer[0 + j] = data[i + j * 4 + 2]
+            buffer[8 + j] = data[i + j * 4 + 3]
+            buffer[16 + j] = data[i + j * 4]
+            buffer[24 + j] = data[i + j * 4 + 1]
+
+        output.extend(buffer)
+
+    return bytes(output)
+
+
+def run_dotemu_sfix_reencode_operation(
+    source_folder: Path,
+    operation: dict[str, Any],
+    log: list[str],
+) -> bytes:
+    source_path = resolve_source_file(source_folder, operation)
+
+    log.append("  Operation: dotemu_sfix_reencode")
+    log.append(f"    Source file: {source_path}")
+
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Source file not found: {source_path}")
+
+    source_data = read_bytes_from_file(source_path)
+    output = dotemu_sfix_reencode_source_bytes(source_data)
+
+    log.append(f"    Source size: {len(source_data)} bytes")
+    log.append(f"    Output size: {len(output)} bytes")
+
+    return output
+
+
+def dotemu_tiles_reencode_pair_data(pair_data: bytes) -> tuple[bytes, bytes]:
+    """
+    Re-encode one Dotemu tile pair block into NeoGeo odd/even C-ROM data.
+
+    The source pair_data should be exactly odd_size + even_size bytes. For a
+    C1/C2 pair where each output is 8 MiB, pair_data is 16 MiB.
+    """
+    if len(pair_data) % 128 != 0:
+        raise ValueError(
+            f"Dotemu tile pair data size must be divisible by 128, got {len(pair_data)}"
+        )
+
+    odd = bytearray()
+    even = bytearray()
+
+    def col_to_neogeo(column: list[list[int]]) -> None:
+        for row in column:
+            bp0 = 0
+            bp1 = 0
+            bp2 = 0
+            bp3 = 0
+
+            pixels = bytearray()
+
+            for value in row:
+                pixels.append(value & 0x0F)
+                pixels.append(value >> 4)
+
+            for pixel_index in range(0, 8):
+                pixel = pixels[pixel_index]
+
+                bp0 |= (pixel & 1) << (7 - pixel_index)
+                bp1 |= ((pixel >> 1) & 1) << (7 - pixel_index)
+                bp2 |= ((pixel >> 2) & 1) << (7 - pixel_index)
+                bp3 |= ((pixel >> 3) & 1) << (7 - pixel_index)
+
+            odd.append(bp0)
+            odd.append(bp1)
+            even.append(bp2)
+            even.append(bp3)
+
+    for tile_offset in range(0, len(pair_data), 128):
+        left_column: list[list[int]] = []
+        right_column: list[list[int]] = []
+        build_row: list[int] = []
+
+        for byte_index in range(0, 128):
+            value = pair_data[tile_offset + byte_index]
+
+            if ((byte_index // 4) % 2) == 0:
+                build_row.append(value)
+
+                if len(build_row) == 4:
+                    left_column.append(build_row[:])
+                    build_row.clear()
+            else:
+                build_row.append(value)
+
+                if len(build_row) == 4:
+                    right_column.append(build_row[:])
+                    build_row.clear()
+
+        col_to_neogeo(right_column)
+        col_to_neogeo(left_column)
+
+    return bytes(odd), bytes(even)
+
+
+def run_dotemu_tiles_reencode_operation(
+    source_folder: Path,
+    operation: dict[str, Any],
+    output_name: str,
+    log: list[str],
+) -> bytes:
+    source_path = resolve_source_file(source_folder, operation)
+
+    log.append("  Operation: dotemu_tiles_reencode")
+    log.append(f"    Source file: {source_path}")
+    log.append(f"    Requested output: {output_name}")
+
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Source file not found: {source_path}")
+
+    source_data = read_bytes_from_file(source_path)
+    pairs = operation["pairs"]
+
+    log.append(f"    Source size: {len(source_data)} bytes")
+    log.append(f"    Pair count:   {len(pairs)}")
+
+    position = 0
+
+    for pair in pairs:
+        odd_name = str(pair["odd"])
+        even_name = str(pair["even"])
+        output_size = int(pair["size"])
+
+        pair_size = output_size * 2
+        pair_end = position + pair_size
+
+        log.append(f"    Pair: {odd_name} / {even_name}")
+        log.append(f"      Output size each: {output_size} bytes")
+        log.append(f"      Source range:     0x{position:08X}-0x{pair_end - 1:08X}")
+
+        if pair_end > len(source_data):
+            raise ValueError(
+                f"Dotemu tile source too small for pair {odd_name}/{even_name}: "
+                f"needs {pair_end} bytes, got {len(source_data)}"
+            )
+
+        pair_data = source_data[position:pair_end]
+        position = pair_end
+
+        if output_name not in {odd_name, even_name}:
+            continue
+
+        odd_data, even_data = dotemu_tiles_reencode_pair_data(pair_data)
+
+        if len(odd_data) != output_size:
+            raise ValueError(
+                f"Unexpected odd output size for {odd_name}: "
+                f"expected {output_size}, got {len(odd_data)}"
+            )
+
+        if len(even_data) != output_size:
+            raise ValueError(
+                f"Unexpected even output size for {even_name}: "
+                f"expected {output_size}, got {len(even_data)}"
+            )
+
+        if output_name == odd_name:
+            log.append(f"      Returning odd output: {odd_name}")
+            return odd_data
+
+        log.append(f"      Returning even output: {even_name}")
+        return even_data
+
+    raise ValueError(
+        f"dotemu_tiles_reencode did not define requested output file: {output_name}"
+    )
+
+
 def run_find_slice_by_crc32_operation(
     source_folder: Path,
     operation: dict[str, Any],
@@ -1294,6 +1488,14 @@ def build_streams_for_file(
 
         elif op_type == "find_slice_by_crc32":
             # Direct find-slice files are handled elsewhere.
+            continue
+
+        elif op_type == "dotemu_sfix_reencode":
+            # Direct Dotemu SFIX files are handled elsewhere.
+            continue
+
+        elif op_type == "dotemu_tiles_reencode":
+            # Direct Dotemu tile files are handled elsewhere.
             continue
 
         elif op_type == "assemble_chunks":
@@ -1441,6 +1643,29 @@ def build_file_data(
         return run_find_slice_by_crc32_operation(
             source_folder,
             find_slice_operation,
+            log,
+        )
+
+    if operation_types.count("dotemu_sfix_reencode") == 1 and "assemble_chunks" not in operation_types:
+        sfix_operation = next(
+            operation for operation in operations
+            if operation["type"] == "dotemu_sfix_reencode"
+        )
+        return run_dotemu_sfix_reencode_operation(
+            source_folder,
+            sfix_operation,
+            log,
+        )
+
+    if operation_types.count("dotemu_tiles_reencode") == 1 and "assemble_chunks" not in operation_types:
+        tile_operation = next(
+            operation for operation in operations
+            if operation["type"] == "dotemu_tiles_reencode"
+        )
+        return run_dotemu_tiles_reencode_operation(
+            source_folder,
+            tile_operation,
+            str(file_entry["output_name"]),
             log,
         )
 
