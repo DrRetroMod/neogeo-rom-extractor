@@ -28,4 +28,4 @@ batch_logs/
 *.log
 
 # Local notes / scratch
-scratch/
+scratch/neogeo_extractor copy.py

@@ -29,8 +29,12 @@ GAME = {
     "search_folder_names": [
         "Samurai Shodown IV",
         "Samurai Shodown 4",
-        "Samurai Spirits - Amakusa Kourin",
+        "Samurai Shodown IV - Amakusa's",
         "Samurai Shodown IV - Amakusa's Revenge",
+        "Samurai Shodown IV - Amakusa's Revenge - Samurai Spirits - Amakusa Kourin",
+        "Samurai Shodown IV - Amakusa's Revenge / Samurai Spirits - Amakusa Kourin",
+        "Samurai Spirits - Amakusa Kourin",
+        "Samurai Spirits Amakusa Kourin",
         "samsho4",
     ],
 

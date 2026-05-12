@@ -39,8 +39,11 @@ GAME = {
 
     "search_folder_names": [
         "Art of Fighting 3",
+        "Art of Fighting 3 - The Path of The",
         "Art of Fighting 3 - The Path of the Warrior",
-        "Art of Fighting - Ryuuko no Ken Gaiden",
+        "Art of Fighting 3 - The Path of the Warrior - Ryuuko no Ken Gaiden",
+        "Art of Fighting 3 - The Path of the Warrior / Ryuuko no Ken Gaiden",
+        "Art of Fighting 3 / Ryuuko no Ken Gaiden",
         "Ryuuko no Ken Gaiden",
         "aof3",
     ],

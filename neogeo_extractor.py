@@ -45,6 +45,7 @@ This version supports:
 - assemble_chunks operations
 - CRC32 + SHA1 validation
 - normal compressed ZIP creation
+- existing source ZIP collection from all top-level folders during batch extraction
 - per-game logs
 """
 
@@ -131,6 +132,17 @@ class GameProcessResult:
     output_folder: Path | None = None
     log_path: Path | None = None
     reason: str | None = None
+
+
+@dataclass
+class ExistingZipCollectionResult:
+    game_id: str
+    title: str
+    copied_count: int
+    skipped_reason: str | None = None
+    output_folder: Path | None = None
+    log_path: Path | None = None
+    copied_files: list[Path] | None = None
 
 
 # ------------------------------------------------------------
@@ -246,6 +258,23 @@ def validate_data(data: bytes, file_entry: dict[str, Any], log: list[str]) -> bo
     return size_ok and crc_ok and sha1_ok
 
 
+def unique_destination_path(destination_folder: Path, filename: str) -> Path:
+    destination = destination_folder / filename
+
+    if not destination.exists():
+        return destination
+
+    stem = destination.stem
+    suffix = destination.suffix
+
+    counter = 2
+    while True:
+        candidate = destination_folder / f"{stem} ({counter}){suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
 # ------------------------------------------------------------
 # Module loading
 # ------------------------------------------------------------
@@ -327,6 +356,7 @@ def iter_candidate_folders() -> list[Path]:
 
     return candidates
 
+
 def calculate_required_source_sizes(game: dict[str, Any]) -> dict[str, int]:
     """
     Calculate minimum source-file sizes required by declared slice-style operations.
@@ -390,6 +420,7 @@ def calculate_required_source_sizes(game: dict[str, Any]) -> dict[str, int]:
 
     return required_sizes
 
+
 def source_folder_has_required_files_and_sizes(
     source_folder: Path,
     required_source_files: list[str],
@@ -413,6 +444,7 @@ def source_folder_has_required_files_and_sizes(
                 )
 
     return True, None
+
 
 # ------------------------------------------------------------
 # Source detection
@@ -474,8 +506,10 @@ def detect_game_source(module: GameModule, candidate_folders: list[Path]) -> Det
                     source_folder=possible_source_folder,
                 )
 
-    # Pass 2: required-source-file and source-size matching.
-    if required_source_files:
+    # Pass 2: optional required-source-file and source-size fallback.
+    # This is disabled by default because many NeoGeo games use the same
+    # generic source filenames and can falsely match another game's folder.
+    if game.get("allow_required_file_fallback", False) and required_source_files:
         for folder in candidate_folders:
             ok, _reason = source_folder_has_required_files_and_sizes(
                 folder,
@@ -509,6 +543,368 @@ def detect_all_games(modules: list[GameModule]) -> list[DetectionResult]:
         detect_game_source(module, candidate_folders)
         for module in modules
     ]
+
+
+# ------------------------------------------------------------
+# Existing source ZIP collection
+# ------------------------------------------------------------
+
+def collect_existing_zips_for_game(
+    module: GameModule,
+    detection: DetectionResult,
+    log: list[str] | None = None,
+    *,
+    verbose: bool = False,
+) -> ExistingZipCollectionResult:
+    game = module.game
+    game_id = str(game["id"])
+    title = str(game["title"])
+    safe_title = sanitize_folder_name(title)
+
+    if not detection.found or detection.game_folder is None:
+        reason = detection.reason or "Game source was not detected."
+        if log is not None:
+            log.append("")
+            log.append("Existing ZIP collection: SKIPPED")
+            log.append(f"Reason: {reason}")
+        return ExistingZipCollectionResult(
+            game_id=game_id,
+            title=title,
+            copied_count=0,
+            skipped_reason=reason,
+        )
+
+    game_folder = detection.game_folder
+    existing_zip_output_folder = OUTPUT_DIR / safe_title
+
+    candidate_zips = sorted(
+        path
+        for path in game_folder.rglob("*.zip")
+        if path.is_file()
+        and not any(part in IGNORED_DIR_NAMES for part in path.relative_to(game_folder).parts)
+    )
+
+    has_neogeo_zip = any(path.name.casefold() == "neogeo.zip" for path in candidate_zips)
+
+    if not has_neogeo_zip:
+        reason = "No neogeo.zip found under detected game folder; skipped ZIP collection."
+        if log is not None:
+            log.append("")
+            log.append("Existing ZIP collection: SKIPPED")
+            log.append(f"Scan root: {game_folder}")
+            log.append(f"Reason: {reason}")
+        if verbose:
+            print("  Existing ZIPs: skipped, no neogeo.zip found")
+        return ExistingZipCollectionResult(
+            game_id=game_id,
+            title=title,
+            copied_count=0,
+            skipped_reason=reason,
+            output_folder=existing_zip_output_folder,
+        )
+
+    backup_existing_folder(existing_zip_output_folder, BACKUPS_DIR / "extracted_neogeo")
+
+    existing_zip_output_folder.mkdir(parents=True, exist_ok=True)
+
+    copied_files: list[Path] = []
+    lines: list[str] = []
+
+    lines.append("Existing ZIP Collection Log")
+    lines.append(f"Timestamp: {datetime.now().isoformat(timespec='seconds')}")
+    lines.append("")
+    lines.append(f"Game ID: {game_id}")
+    lines.append(f"Title:   {title}")
+    lines.append(f"Source game folder: {game_folder}")
+    lines.append(f"Output folder:      {existing_zip_output_folder}")
+    lines.append("")
+    lines.append("Rule:")
+    lines.append("  neogeo.zip was found, so all .zip files under the detected game folder were copied.")
+    lines.append("  These ZIPs were copied from the source game folder.")
+    lines.append("  These ZIPs were not generated or validated by this extractor.")
+    lines.append("")
+    lines.append("Copied ZIP files:")
+
+    if log is not None:
+        log.append("")
+        log.append("Existing ZIP collection: RUN")
+        log.append(f"Scan root: {game_folder}")
+        log.append("Trigger: neogeo.zip found")
+        log.append("Copied files:")
+
+    for source_zip in candidate_zips:
+        destination_zip = unique_destination_path(existing_zip_output_folder, source_zip.name)
+        shutil.copy2(source_zip, destination_zip)
+        copied_files.append(destination_zip)
+
+        try:
+            relative_source = source_zip.relative_to(game_folder)
+        except ValueError:
+            relative_source = source_zip
+
+        lines.append(f"  - {relative_source} -> {destination_zip.name}")
+
+        if log is not None:
+            log.append(f"  - {relative_source} -> {destination_zip}")
+
+    if not copied_files:
+        lines.append("  none")
+
+    log_path = existing_zip_output_folder / "existing ZIP collection log.txt"
+    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    if verbose:
+        print(f"  Existing ZIPs: copied {len(copied_files)} file(s)")
+
+    return ExistingZipCollectionResult(
+        game_id=game_id,
+        title=title,
+        copied_count=len(copied_files),
+        output_folder=existing_zip_output_folder,
+        log_path=log_path,
+        copied_files=copied_files,
+    )
+
+
+def collect_existing_zips_for_detected_games(modules: list[GameModule]) -> list[ExistingZipCollectionResult]:
+    candidate_folders = iter_candidate_folders()
+    results: list[ExistingZipCollectionResult] = []
+
+    print()
+    print("Collecting existing ZIPs from detected game folders.")
+    print("Rule: only copy ZIPs when neogeo.zip is found under that game folder.")
+
+    for module in modules:
+        detection = detect_game_source(module, candidate_folders)
+        title = str(module.game["title"])
+
+        print()
+        print(f"Checking: {title}")
+
+        if not detection.found:
+            print(f"  Status: SKIPPED")
+            print(f"  Reason: {detection.reason}")
+            results.append(
+                ExistingZipCollectionResult(
+                    game_id=str(module.game["id"]),
+                    title=title,
+                    copied_count=0,
+                    skipped_reason=detection.reason,
+                )
+            )
+            continue
+
+        result = collect_existing_zips_for_game(
+            module,
+            detection,
+            log=None,
+            verbose=True,
+        )
+        results.append(result)
+
+    write_existing_zip_collection_log(results)
+
+    print()
+    print("Existing ZIP collection finished.")
+
+    return results
+
+
+def write_existing_zip_collection_log(results: list[ExistingZipCollectionResult]) -> Path:
+    BATCH_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+    log_path = BATCH_LOGS_DIR / f"Existing ZIP collection - {timestamp()}.txt"
+
+    lines: list[str] = []
+    lines.append("Existing ZIP Collection Batch Log")
+    lines.append(f"Timestamp: {datetime.now().isoformat(timespec='seconds')}")
+    lines.append("")
+    lines.append("Rule:")
+    lines.append("  For each detected game folder, copy ZIPs only if neogeo.zip exists under that folder.")
+    lines.append("  Copied ZIPs are source/vendor ZIPs, not generated or validated extractor output.")
+    lines.append("")
+
+    for result in results:
+        lines.append(result.title)
+
+        if result.copied_count > 0:
+            lines.append(f"  Status: COPIED {result.copied_count} file(s)")
+            if result.output_folder:
+                lines.append(f"  Output folder: {result.output_folder}")
+            if result.log_path:
+                lines.append(f"  Log: {result.log_path}")
+        else:
+            lines.append("  Status: SKIPPED")
+            if result.skipped_reason:
+                lines.append(f"  Reason: {result.skipped_reason}")
+
+        lines.append("")
+
+    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return log_path
+
+def iter_top_level_scan_folders() -> list[Path]:
+    """
+    Return top-level folders under SCAN_ROOT that are not extractor/framework folders.
+
+    This is used by the global existing-ZIP collector. It deliberately does
+    not require a game module, because the point of that collector is to find
+    vendor/source ZIPs in all folders when neogeo.zip is present.
+    """
+    folders: list[Path] = []
+
+    for path in sorted(SCAN_ROOT.iterdir()):
+        if not path.is_dir():
+            continue
+
+        if path.name == SCRIPT_DIR.name:
+            continue
+
+        if path.name in IGNORED_DIR_NAMES:
+            continue
+
+        folders.append(path)
+
+    return folders
+
+
+def find_zip_files_under(folder: Path) -> list[Path]:
+    """
+    Find ZIP files below a folder while skipping framework-style folders.
+    """
+    zip_files: list[Path] = []
+
+    for path in folder.rglob("*.zip"):
+        if not path.is_file():
+            continue
+
+        try:
+            relative_parts = path.relative_to(folder).parts
+        except ValueError:
+            relative_parts = path.parts
+
+        if any(part in IGNORED_DIR_NAMES for part in relative_parts):
+            continue
+
+        zip_files.append(path)
+
+    return sorted(zip_files)
+
+
+def collect_existing_zips_from_folder(
+    source_root: Path,
+    output_title: str,
+    *,
+    verbose: bool = False,
+) -> ExistingZipCollectionResult:
+    """
+    Scan one top-level source folder.
+
+    Rule:
+      - If neogeo.zip exists anywhere below source_root, copy every .zip found
+        below source_root.
+      - If neogeo.zip is not found, copy nothing.
+
+    The output folder name is based on output_title, normally the top-level
+    folder name for module-free global scans.
+    """
+    safe_title = sanitize_folder_name(output_title)
+    existing_zip_output_folder = OUTPUT_DIR / safe_title
+
+    candidate_zips = find_zip_files_under(source_root)
+    has_neogeo_zip = any(path.name.casefold() == "neogeo.zip" for path in candidate_zips)
+
+    if not has_neogeo_zip:
+        reason = "No neogeo.zip found; skipped ZIP collection."
+        if verbose:
+            print("  Existing ZIPs: skipped, no neogeo.zip found")
+        return ExistingZipCollectionResult(
+            game_id=source_root.name,
+            title=output_title,
+            copied_count=0,
+            skipped_reason=reason,
+            output_folder=existing_zip_output_folder,
+        )
+
+    backup_existing_folder(existing_zip_output_folder, BACKUPS_DIR / "extracted_neogeo")
+    existing_zip_output_folder.mkdir(parents=True, exist_ok=True)
+
+    copied_files: list[Path] = []
+    lines: list[str] = []
+
+    lines.append("Existing ZIP Collection Log")
+    lines.append(f"Timestamp: {datetime.now().isoformat(timespec='seconds')}")
+    lines.append("")
+    lines.append(f"Source root:   {source_root}")
+    lines.append(f"Output title:  {output_title}")
+    lines.append(f"Output folder: {existing_zip_output_folder}")
+    lines.append("")
+    lines.append("Rule:")
+    lines.append("  neogeo.zip was found, so all .zip files under this source folder were copied.")
+    lines.append("  These ZIPs were copied from the source game folder.")
+    lines.append("  These ZIPs were not generated or validated by this extractor.")
+    lines.append("")
+    lines.append("Copied ZIP files:")
+
+    for source_zip in candidate_zips:
+        destination_zip = unique_destination_path(existing_zip_output_folder, source_zip.name)
+        shutil.copy2(source_zip, destination_zip)
+        copied_files.append(destination_zip)
+
+        try:
+            relative_source = source_zip.relative_to(source_root)
+        except ValueError:
+            relative_source = source_zip
+
+        lines.append(f"  - {relative_source} -> {destination_zip.name}")
+
+    log_path = existing_zip_output_folder / "existing ZIP collection log.txt"
+    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    if verbose:
+        print(f"  Existing ZIPs: copied {len(copied_files)} file(s)")
+
+    return ExistingZipCollectionResult(
+        game_id=source_root.name,
+        title=output_title,
+        copied_count=len(copied_files),
+        output_folder=existing_zip_output_folder,
+        log_path=log_path,
+        copied_files=copied_files,
+    )
+
+
+def collect_existing_zips_from_all_folders() -> list[ExistingZipCollectionResult]:
+    """
+    Global existing-ZIP collector.
+
+    This scans every top-level folder under SCAN_ROOT, not just folders that
+    have game modules. It is intentionally gated by neogeo.zip.
+    """
+    results: list[ExistingZipCollectionResult] = []
+
+    print()
+    print("Collecting existing ZIPs from all top-level folders.")
+    print("Rule: if neogeo.zip is found under a folder, copy all ZIPs from that folder.")
+
+    for folder in iter_top_level_scan_folders():
+        print()
+        print(f"Checking folder: {folder.name}")
+
+        result = collect_existing_zips_from_folder(
+            folder,
+            folder.name,
+            verbose=True,
+        )
+        results.append(result)
+
+    write_existing_zip_collection_log(results)
+
+    print()
+    print("Existing ZIP collection finished.")
+
+    return results
+
 
 
 # ------------------------------------------------------------
@@ -611,6 +1007,7 @@ def neogeo_4bpp_tile_decode(
         for stream_name, data in streams.items()
     }
 
+
 # ------------------------------------------------------------
 # Operation engine
 # ------------------------------------------------------------
@@ -656,6 +1053,7 @@ def run_slice_operation(source_folder: Path, operation: dict[str, Any], log: lis
         f.seek(offset)
         return f.read(size)
 
+
 def run_concat_slices_operation(
     source_folder: Path,
     operation: dict[str, Any],
@@ -694,6 +1092,7 @@ def run_concat_slices_operation(
             output.extend(f.read(size))
 
     return bytes(output)
+
 
 def run_conditional_slice_operation(
     source_folder: Path,
@@ -760,90 +1159,61 @@ def run_conditional_slice_operation(
     )
 
 
-
 def run_find_slice_by_crc32_operation(
-
     source_folder: Path,
-
     operation: dict[str, Any],
-
     log: list[str],
-
 ) -> bytes:
-
     source_path = resolve_source_file(source_folder, operation)
 
     offset_start = int(operation.get("offset_start", 0))
-
     offset_end = operation.get("offset_end")
-
     step = int(operation.get("step", 0x10000))
-
     size = int(operation["size"])
-
     expected_crc32 = str(operation["crc32"]).casefold()
 
     log.append("  Operation: find_slice_by_crc32")
-
     log.append(f"    Source file:     {source_path}")
-
     log.append(f"    Offset start:    0x{offset_start:08X}")
-
     log.append(f"    Step:            0x{step:08X}")
-
     log.append(f"    Slice size:      {size} bytes")
-
     log.append(f"    Expected CRC32:  {expected_crc32}")
 
     if not source_path.is_file():
-
         raise FileNotFoundError(f"Source file not found: {source_path}")
 
     source_data = read_bytes_from_file(source_path)
-
     source_size = len(source_data)
 
     if offset_end is None:
-
         offset_end_int = source_size - size
-
     else:
-
         offset_end_int = int(offset_end)
 
     if offset_end_int < offset_start:
-
         raise ValueError(
-
             f"Invalid find_slice_by_crc32 range: start={offset_start}, end={offset_end_int}"
-
         )
 
     for offset in range(offset_start, offset_end_int + 1, step):
-
         end = offset + size
 
         if end > source_size:
-
             continue
 
         candidate = source_data[offset:end]
-
         got_crc32 = crc32_hex(candidate)
 
         log.append(f"    Candidate offset 0x{offset:08X}: CRC32 {got_crc32}")
 
         if got_crc32 == expected_crc32:
-
             log.append(f"    Result: MATCH at offset 0x{offset:08X}")
-
             return candidate
 
     raise ValueError(
-
         f"No slice found in {source_path} matching CRC32 {expected_crc32}"
-
     )
+
 
 def build_streams_for_file(
     source_folder: Path,
@@ -920,6 +1290,7 @@ def build_streams_for_file(
             raise NotImplementedError(f"Unsupported operation type: {op_type}")
 
     return streams
+
 
 def run_assemble_chunks_operation(
     operation: dict[str, Any],
@@ -1070,6 +1441,7 @@ def build_file_data(
 
     return assembled_data
 
+
 # ------------------------------------------------------------
 # Extraction engine
 # ------------------------------------------------------------
@@ -1181,6 +1553,12 @@ def create_zip(
             log.append(f"    - {name}")
         return False
 
+    if zip_path.exists():
+        preserved_name = f"existing source {zip_name}"
+        preserved_path = unique_destination_path(output_folder, preserved_name)
+        shutil.move(str(zip_path), str(preserved_path))
+        log.append(f"  Existing ZIP preserved before writing generated ZIP: {preserved_path.name}")
+
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for name in required_files:
             source_path = built_files[name]
@@ -1191,7 +1569,12 @@ def create_zip(
     return True
 
 
-def process_game(module: GameModule) -> GameProcessResult:
+def process_game(
+    module: GameModule,
+    *,
+    collect_existing_zips: bool = False,
+    backup_output: bool = True,
+) -> GameProcessResult:
     game = module.game
     game_id = str(game["id"])
     title = str(game["title"])
@@ -1243,12 +1626,22 @@ def process_game(module: GameModule) -> GameProcessResult:
     output_game_folder = OUTPUT_DIR / safe_title
 
     backup_existing_folder(temp_game_folder, BACKUPS_DIR / "temp")
-    backup_existing_folder(output_game_folder, BACKUPS_DIR / "extracted_neogeo")
+    if backup_output:
+        backup_existing_folder(output_game_folder, BACKUPS_DIR / "extracted_neogeo")
 
     temp_game_folder.mkdir(parents=True, exist_ok=True)
     (temp_game_folder / "zip_staging").mkdir(parents=True, exist_ok=True)
 
     output_game_folder.mkdir(parents=True, exist_ok=True)
+
+    if collect_existing_zips:
+        print("  Checking existing source ZIPs before extraction")
+        collect_existing_zips_for_game(
+            module,
+            detection,
+            log,
+            verbose=True,
+        )
 
     built_files: dict[str, Path] = {}
     failed_files: list[FileBuildResult] = []
@@ -1287,6 +1680,8 @@ def process_game(module: GameModule) -> GameProcessResult:
         log_path.write_text("\n".join(log) + "\n", encoding="utf-8")
 
         # Move failed output folder away if it exists and is empty/partial.
+        # Existing ZIP collection for a failed game remains under failed output backup/logs
+        # only if it was already included in the output folder backup before this run.
         if output_game_folder.exists():
             shutil.rmtree(output_game_folder, ignore_errors=True)
 
@@ -1470,6 +1865,10 @@ def extract_all_games(modules: list[GameModule]) -> None:
 
     print()
     print("Batch extraction started.")
+    print("Existing ZIP collection will run first across all top-level folders.")
+    print("Rule: if neogeo.zip is found under a folder, copy all ZIPs from that folder.")
+
+    collect_existing_zips_from_all_folders()
 
     results: list[GameProcessResult] = []
 
@@ -1477,7 +1876,7 @@ def extract_all_games(modules: list[GameModule]) -> None:
         print()
         print(f"Processing: {module.game['title']}")
 
-        result = process_game(module)
+        result = process_game(module, collect_existing_zips=False, backup_output=False)
         results.append(result)
 
         print(f"  Status: {result.status}")
@@ -1505,6 +1904,7 @@ def interactive_menu(modules: list[GameModule]) -> None:
         print("[3] Dry run / detect available games only")
         print("[4] List installed game modules")
         print("[5] Show paths")
+        print("[6] Collect existing ZIPs from all folders")
         print("[Q] Quit")
         print()
 
@@ -1532,6 +1932,10 @@ def interactive_menu(modules: list[GameModule]) -> None:
 
         if choice == "5":
             print_paths()
+            continue
+
+        if choice == "6":
+            collect_existing_zips_from_all_folders()
             continue
 
         print("Invalid option.")
@@ -1602,6 +2006,7 @@ def choose_one_game_menu(modules: list[GameModule]) -> None:
     selected_module, _selected_detection = detected_items[selected_index - 1]
     extract_one_game(selected_module)
 
+
 # ------------------------------------------------------------
 # CLI
 # ------------------------------------------------------------
@@ -1641,6 +2046,12 @@ def parse_args() -> argparse.Namespace:
         help="Show important framework paths.",
     )
 
+    parser.add_argument(
+        "--collect-existing-zips",
+        action="store_true",
+        help="Collect existing source ZIPs from all top-level folders without extracting.",
+    )
+
     return parser.parse_args()
 
 
@@ -1672,6 +2083,10 @@ def main() -> int:
 
     if args.list_modules:
         print_modules(modules)
+        return 0
+
+    if args.collect_existing_zips:
+        collect_existing_zips_from_all_folders()
         return 0
 
     if args.dry_run:
