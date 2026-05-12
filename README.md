@@ -149,19 +149,16 @@ This repository does not include:
 - tools for downloading games
 - instructions for piracy
 
-## License
+## Credits and Acknowledgements
 
-This project is released under the license specified in the `LICENSE` file.
+Parts of this project were informed by, adapted from, or cross-checked against earlier Neo Geo extraction work, including:
 
-If no license has been added yet, all rights are reserved by default. Add a license before allowing public reuse, modification, or redistribution of the code.
+- [NGPrimeClaim](https://github.com/Lx32/NGPrimeClaim) by Lx32
+- [mslug-rom-extractor](https://github.com/terminatorhex/mslug-rom-extractor) by terminatorhex
 
-Recommended options:
+These projects were useful references for understanding Neo Geo ROM extraction layouts and workflows. This repository is not affiliated with, endorsed by, or maintained by the authors of those projects.
 
-- **MIT License** — simple and permissive
-- **GPLv3** — requires modified versions to remain open source
-- **Apache 2.0** — permissive, with explicit patent language
-
-Choose the license that matches how you want others to use the project.
+Where code or logic has been adapted from those repositories, it should remain credited in the relevant source files as well as here.
 
 ## Disclaimer
 
@@ -200,3 +197,9 @@ This tool is intended for users who own the relevant games and want to extract t
 Do not use this project to obtain, distribute, or share copyrighted game data that you do not have the legal right to use.
 
 The author does not endorse piracy or copyright infringement.
+
+## License (GPLv3)
+
+This project is released under the GPLv3 license, specified in the `LICENSE` file.
+
+You may use, modify, and redistribute this extractor, but if you redistribute it or modified versions, you must keep it under GPLv3 and provide the source code.
