@@ -12,7 +12,7 @@ Supported games are added through individual game modules in the `game_modules/`
 
 ## Currently Supported Games
 
-The following game modules are currently included:
+The following games are supported (29 in total so far):
 
 - 3 Count Bout
 - Alpha Mission II
@@ -20,10 +20,12 @@ The following game modules are currently included:
 - Crossed Swords
 - Ghost Pilots
 - King of the Monsters 2
+- Kizuna Encounter - Super Tag Battle
 - Last Resort
 - Magician Lord
 - Metal Slug
 - Metal Slug 2
+- Metal Slug 4
 - Metal Slug X
 - Mutation Nation
 - Ninja Commando
@@ -35,6 +37,7 @@ The following game modules are currently included:
 - Sengoku 2
 - Soccer Brawl
 - Super Sidekicks
+- The King of Fighters 2003
 - The Last Blade
 - The Last Blade 2
 - The Super Spy
