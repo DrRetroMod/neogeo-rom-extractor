@@ -67,7 +67,7 @@ from pathlib import Path
 
 from neogeo.cmc import cmc50_gfx_encrypt, cmc50_m1_encrypt
 from neogeo.pcm2 import pcm2_unswap
-from neogeo.pvc import kof2003h_p_encrypt
+from neogeo.pvc import kof2003_p_encrypt
 
 ROM_ID = "271"
 ZIP_NAME = "kof2003h"
@@ -253,7 +253,7 @@ def convert(source_dir: Path, output_zip: Path) -> list[tuple[str, int, str]]:
 
         # P: 68K code
         p_source = read_exact_prefix(source_dir / "p1.bin", SIZE_P_SOURCE)
-        p_enc_data = kof2003h_p_encrypt(p_source)
+        p_enc_data = kof2003_p_encrypt(p_source)
         if len(p_enc_data) < SIZE_P_SOURCE:
             raise ValueError(f"PVC P output too small: expected 0x{SIZE_P_SOURCE:X}, got 0x{len(p_enc_data):X}")
         p12 = p_enc_data[:SIZE_P12]
