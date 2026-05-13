@@ -38,13 +38,13 @@ Expected source files in --source:
 
 Example, Windows PowerShell:
   py .\mslug4_code_mystics_converter.py `
-    --source "R:\Projects\Game Extraction\Amazon Games\Metal Slug 4\Data\rom" `
+    --source "PATH\TO\Metal Slug 4\Data\rom" `
     --neo-cmc .\neo-cmc.exe `
     --output .\mslug4h.zip
 
-Example, macOS/Linux/WSL:
+Example, macOS/Linux:
   python3 ./mslug4_code_mystics_converter.py \
-    --source "/mnt/d/Amazon Games/Library/Metal Slug 4/Data/rom" \
+    --source "/path/to/Metal Slug 4/Data/rom" \
     --neo-cmc ./neo-cmc \
     --output ./mslug4h.zip
 """

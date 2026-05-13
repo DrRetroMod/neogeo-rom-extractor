@@ -37,13 +37,13 @@ Expected source files in --source:
 
 Example:
   python3 kof2003_code_mystics_converter.py \
-    --source "/mnt/d/Amazon Games/Library/The King of Fighters 2003/Data/rom" \
+    --source "/path/to/source_rom_folder" \
     --neo-cmc ./neo-cmc \
     --output ./kof2003h.zip
 
 On Windows PowerShell:
   py .\kof2003_code_mystics_converter.py `
-    --source "R:\Projects\Game Extraction\Amazon Games\The King of Fighters 2003\Data\rom" `
+    --source "PATH\TO\SOURCE_ROM_FOLDER" `
     --neo-cmc .\neo-cmc.exe `
     --output .\kof2003h.zip
 """
