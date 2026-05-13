@@ -16,6 +16,24 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+# Metal Slug X patch data:
+# The JSON patch data used by this module is directly reused from
+# mslug-rom-extractor by terminatorhex, with the file renamed for this project.
+# See README.md -> Special thanks to terminatorhex.
+
+# Extraction notes:
+# This module was developed through source-file analysis, local testing,
+# hash comparison, and comparison with public Neo Geo extraction, emulation,
+# and preservation research.
+#
+# Metal Slug X extraction behaviour was informed by mslug-rom-extractor
+# by terminatorhex. The Metal Slug X JSON patch data is directly reused
+# from that project, with the file renamed for this project:
+# https://github.com/terminatorhex/mslug-rom-extractor
+#
+# See README.md -> Credits and Acknowledgements for full project-wide credits.
+
+
 GAME = {'id': 'mslugx_dotemu',
  'title': 'Metal Slug X - Super Vehicle-001',
  'mame_set': 'mslugx',

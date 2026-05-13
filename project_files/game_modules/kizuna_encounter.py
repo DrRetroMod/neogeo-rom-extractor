@@ -25,6 +25,19 @@ Source layout: Code Mystics/Amazon style files:
 Converted from the standalone kizuna_code_mystics_converter.py.
 """
 
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Extraction notes:
+# This module was developed through source-file analysis, local testing,
+# hash comparison, and comparison with public Neo Geo extraction, emulation,
+# and preservation research.
+#
+# Kizuna Encounter extraction behaviour was informed by goNCommand
+# by Lionel Cordesses:
+# https://github.com/lioneltrs/goNCommand
+#
+# See README.md -> Credits and Acknowledgements for full project-wide credits.
+
 GAME = {
     "id": "kizuna",
     "title": "Kizuna Encounter - Super Tag Battle / Fu'un Super Tag Battle",

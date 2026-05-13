@@ -16,6 +16,17 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+# Extraction notes:
+# This module was developed through source-file analysis, local testing,
+# hash comparison, and comparison with public Neo Geo extraction, emulation,
+# and preservation research.
+#
+# The Last Blade extraction behaviour was informed by mslug-rom-extractor
+# by terminatorhex:
+# https://github.com/terminatorhex/mslug-rom-extractor
+#
+# See README.md -> Credits and Acknowledgements for full project-wide credits.
+
 GAME = {'id': 'lastblad_dotemu',
  'title': 'The Last Blade / Bakumatsu Roman - Gekka no Kenshi',
  'mame_set': 'lastblad',

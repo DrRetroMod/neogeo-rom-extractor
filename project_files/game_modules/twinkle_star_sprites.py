@@ -16,6 +16,17 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+# Extraction notes:
+# This module was developed through source-file analysis, local testing,
+# hash comparison, and comparison with public Neo Geo extraction, emulation,
+# and preservation research.
+#
+# Twinkle Star Sprites extraction behaviour was informed by mslug-rom-extractor
+# by terminatorhex:
+# https://github.com/terminatorhex/mslug-rom-extractor
+#
+# See README.md -> Credits and Acknowledgements for full project-wide credits.
+
 GAME = {'id': 'twinspri_dotemu',
  'title': 'Twinkle Star Sprites',
  'mame_set': 'twinspri',

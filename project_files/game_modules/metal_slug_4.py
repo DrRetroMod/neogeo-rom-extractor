@@ -25,9 +25,8 @@ Builds an mslug4h-style Neo Geo ZIP from the Code Mystics source files used by
 Metal Slug 4 from Amazon Prime Gaming, following the public shell conversion
 flow credited to alhumbra, scrap-a, Tomasz Bednarz, and Lionel Cordesses.
 
-This script replaces dd, split, cat, srec_cat, ss_unswizzle, and zip with
-Python code. It still requires the external neo-cmc executable for CMC
-encryption/conversion.
+This script replaces dd, split, cat, srec_cat, ss_unswizzle, zip, and the
+old external neo-cmc command-line step with Python-side conversion helpers.
 
 Expected source files in --source:
   p1.bin
@@ -39,27 +38,35 @@ Expected source files in --source:
 Example, Windows PowerShell:
   py .\mslug4_code_mystics_converter.py `
     --source "PATH\TO\Metal Slug 4\Data\rom" `
-    --neo-cmc .\neo-cmc.exe `
     --output .\mslug4h.zip
 
 Example, macOS/Linux:
   python3 ./mslug4_code_mystics_converter.py \
     --source "/path/to/Metal Slug 4/Data/rom" \
-    --neo-cmc ./neo-cmc \
     --output ./mslug4h.zip
 """
+
+# Extraction notes:
+# This module was developed through source-file analysis, local testing,
+# hash comparison, and comparison with public Neo Geo extraction, emulation,
+# and preservation research.
+#
+# Metal Slug 4 extraction behaviour was informed by goNCommand
+# by Lionel Cordesses:
+# https://github.com/lioneltrs/goNCommand
+#
+# See README.md -> Credits and Acknowledgements for full project-wide credits.
 
 from __future__ import annotations
 
 import argparse
 import binascii
-import platform
-import shutil
-import subprocess
 import sys
-import tempfile
 import zipfile
 from pathlib import Path
+
+from neogeo.cmc import cmc50_gfx_encrypt, cmc50_m1_encrypt
+from neogeo.pcm2 import pcm2_encrypt
 
 ROM_ID = "263"
 ZIP_NAME = "mslug4h"
@@ -89,20 +96,13 @@ GAME = {
     ],
     "source_subfolders": ["Data/rom", "data/rom", "rom", "."],
     "required_source_files": ["p1.bin", "m1.bin", "v1.bin", "c1.bin", "s2.bin"],
-    "external_tools": {
-        "neo_cmc": {
-            "Darwin": ["neo-cmc-macos", "neo-cmc"],
-            "Linux": ["neo-cmc-linux", "neo-cmc"],
-            "Windows": ["neo-cmc.exe", "neo-cmc"],
-            "default": ["neo-cmc", "neo-cmc.exe"],
-        },
-    },
+
     "notes": {
-        "summary": "Code Mystics/Amazon source layout for Metal Slug 4. This module uses its own custom converter because it requires neo-cmc.",
+        "summary": "Code Mystics/Amazon source layout for Metal Slug 4. This module uses its own custom converter with built-in Neo Geo helpers.",
         "details": [
             "The conversion logic remains game-specific inside this module.",
             "The core should only call run_custom_converter when a module provides it.",
-            "Requires the correct platform neo-cmc binary in the extractor tools folder, extractor folder, game_modules/tools folder, or PATH.",
+            "Uses the shared neogeo helper package for PCM2 and CMC50 conversion.",
         ],
     },
     "outputs": [
@@ -110,7 +110,7 @@ GAME = {
             "zip_name": "mslug4h.zip",
             "set_name": "mslug4h",
             "type": "main",
-            "description": "MAME-compatible mslug4h set reconstructed from Code Mystics source files using neo-cmc.",
+            "description": "MAME-compatible mslug4h set reconstructed from Code Mystics source files using built-in Neo Geo helpers.",
             "files": [
                 "263-c1.c1",
                 "263-c2.c2",
@@ -139,11 +139,6 @@ def read_exact_prefix(path: Path, size: int) -> bytes:
             f"{path.name} is too small: expected at least 0x{size:X} bytes, got 0x{len(data):X}"
         )
     return data[:size]
-
-
-def write_bytes(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
 
 
 def crc32_hex(data: bytes) -> str:
@@ -211,43 +206,14 @@ def split_odd_even(data: bytes) -> tuple[bytes, bytes]:
     return data[0::2], data[1::2]
 
 
-def find_executable(path_or_name: str) -> str:
-    candidate = Path(path_or_name)
-    if candidate.exists():
-        return str(candidate)
-
-    found = shutil.which(path_or_name)
-    if found:
-        return found
-
-    raise FileNotFoundError(f"Could not find executable: {path_or_name}")
-
-
-def run_neo_cmc(neo_cmc: str, input_file: Path, offset: int, output_file: Path, mode: str) -> None:
-    cmd = [neo_cmc, str(input_file), str(offset), str(output_file), "1", ROM_ID, mode]
-    result = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    if result.returncode != 0:
-        details = []
-        if result.stdout.strip():
-            details.append("stdout:\n" + result.stdout.strip())
-        if result.stderr.strip():
-            details.append("stderr:\n" + result.stderr.strip())
-        raise RuntimeError(f"neo-cmc failed: {' '.join(cmd)}\n" + "\n".join(details))
-
-    if not output_file.exists():
-        raise RuntimeError(f"neo-cmc did not create expected output: {output_file}")
-
-
 def add_zip_entry(zf: zipfile.ZipFile, arcname: str, data: bytes, report: list[tuple[str, int, str]]) -> None:
     zf.writestr(arcname, data)
     report.append((arcname, len(data), crc32_hex(data)))
 
 
-def convert(source_dir: Path, output_zip: Path, neo_cmc_arg: str, keep_temp: bool) -> list[tuple[str, int, str]]:
+def convert(source_dir: Path, output_zip: Path) -> list[tuple[str, int, str]]:
     source_dir = source_dir.resolve()
     output_zip = output_zip.resolve()
-    neo_cmc = find_executable(neo_cmc_arg)
 
     required = ["p1.bin", "m1.bin", "v1.bin", "c1.bin", "s2.bin"]
     missing = [name for name in required if not (source_dir / name).is_file()]
@@ -258,137 +224,65 @@ def convert(source_dir: Path, output_zip: Path, neo_cmc_arg: str, keep_temp: boo
     if output_zip.exists():
         output_zip.unlink()
 
-    temp_root: tempfile.TemporaryDirectory[str] | None = None
-    if keep_temp:
-        temp_path = output_zip.parent / f"{ZIP_NAME}_temp"
-        if temp_path.exists():
-            shutil.rmtree(temp_path)
-        temp_path.mkdir(parents=True)
-    else:
-        temp_root = tempfile.TemporaryDirectory(prefix=f"{ZIP_NAME}_")
-        temp_path = Path(temp_root.name)
-
     report: list[tuple[str, int, str]] = []
 
-    try:
-        with zipfile.ZipFile(output_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            # S: fixed/text data. The shell script takes this from s2.bin, not s1.bin.
-            add_zip_entry(zf, f"{ROM_ID}-s1d.s1", read_exact_prefix(source_dir / "s2.bin", SIZE_S), report)
+    with zipfile.ZipFile(output_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        # S: fixed/text data. The shell script takes this from s2.bin, not s1.bin.
+        add_zip_entry(zf, f"{ROM_ID}-s1d.s1", read_exact_prefix(source_dir / "s2.bin", SIZE_S), report)
 
-            # V: sound sample data.
-            v_enc = temp_path / "v1enc.tmp"
-            run_neo_cmc(neo_cmc, source_dir / "v1.bin", 0, v_enc, "V")
-            v_data = v_enc.read_bytes()
-            if len(v_data) < SIZE_V_TOTAL:
-                raise ValueError(
-                    f"neo-cmc V output too small: expected 0x{SIZE_V_TOTAL:X}, got 0x{len(v_data):X}"
-                )
-            add_zip_entry(zf, f"{ROM_ID}-v1.v1", v_data[0:SIZE_V_PART], report)
-            add_zip_entry(zf, f"{ROM_ID}-v2.v2", v_data[SIZE_V_PART:SIZE_V_TOTAL], report)
+        # V: sound sample data.
+        v_data = pcm2_encrypt((source_dir / "v1.bin").read_bytes(), value=8)
+        if len(v_data) < SIZE_V_TOTAL:
+            raise ValueError(
+                f"PCM2 V output too small: expected 0x{SIZE_V_TOTAL:X}, got 0x{len(v_data):X}"
+            )
+        add_zip_entry(zf, f"{ROM_ID}-v1.v1", v_data[0:SIZE_V_PART], report)
+        add_zip_entry(zf, f"{ROM_ID}-v2.v2", v_data[SIZE_V_PART:SIZE_V_TOTAL], report)
 
-            # M: Z80 code. Shell script uses first 64 KiB from m1.bin, then 64 KiB of 0xFF padding.
-            m_dec = read_exact_prefix(source_dir / "m1.bin", SIZE_M_PREFIX) + (b"\xFF" * SIZE_M_PAD)
-            m_tmp = temp_path / f"{ROM_ID}-m1d.m1"
-            write_bytes(m_tmp, m_dec)
-            m_out = temp_path / f"{ROM_ID}-m1.m1"
-            run_neo_cmc(neo_cmc, m_tmp, 0, m_out, "M")
-            add_zip_entry(zf, f"{ROM_ID}-m1.m1", m_out.read_bytes(), report)
+        # M: Z80 code. Shell script uses first 64 KiB from m1.bin, then 64 KiB of 0xFF padding.
+        m_dec = read_exact_prefix(source_dir / "m1.bin", SIZE_M_PREFIX) + (b"\xFF" * SIZE_M_PAD)
+        m_out = cmc50_m1_encrypt(m_dec)
+        add_zip_entry(zf, f"{ROM_ID}-m1.m1", m_out, report)
 
-            # P: 68K program code. No neo-cmc step in the Metal Slug 4 shell script.
-            p_source = source_dir / "p1.bin"
-            add_zip_entry(zf, f"{ROM_ID}-ph1.p1", read_exact_prefix(p_source, SIZE_P1), report)
-            p_all = read_exact_prefix(p_source, SIZE_P1 + SIZE_P2)
-            add_zip_entry(zf, f"{ROM_ID}-ph2.sp2", p_all[SIZE_P1:SIZE_P1 + SIZE_P2], report)
+        # P: 68K program code. No CMC step in the Metal Slug 4 shell script.
+        p_source = source_dir / "p1.bin"
+        add_zip_entry(zf, f"{ROM_ID}-ph1.p1", read_exact_prefix(p_source, SIZE_P1), report)
+        p_all = read_exact_prefix(p_source, SIZE_P1 + SIZE_P2)
+        add_zip_entry(zf, f"{ROM_ID}-ph2.sp2", p_all[SIZE_P1:SIZE_P1 + SIZE_P2], report)
 
-            # C: sprites.
-            c_source = (source_dir / "c1.bin").read_bytes()
-            odd, even = ss_unswizzle(c_source)
-            if len(odd) < SIZE_C_HALF or len(even) < SIZE_C_HALF:
-                raise ValueError(
-                    "ss_unswizzle output too small: "
-                    f"expected at least 0x{SIZE_C_HALF:X} each, "
-                    f"got odd=0x{len(odd):X}, even=0x{len(even):X}"
-                )
+        # C: sprites.
+        c_source = (source_dir / "c1.bin").read_bytes()
+        odd, even = ss_unswizzle(c_source)
+        if len(odd) < SIZE_C_HALF or len(even) < SIZE_C_HALF:
+            raise ValueError(
+                "ss_unswizzle output too small: "
+                f"expected at least 0x{SIZE_C_HALF:X} each, "
+                f"got odd=0x{len(odd):X}, even=0x{len(even):X}"
+            )
 
-            # The shell script uses the first three 8 MiB chunks from odd and even.
-            odd1 = odd[:SIZE_C_HALF]
-            even1 = even[:SIZE_C_HALF]
-            c_dec = interleave_odd_even(odd1, even1)
-            if len(c_dec) != SIZE_C_TOTAL:
-                raise ValueError(f"C intermediate size mismatch: expected 0x{SIZE_C_TOTAL:X}, got 0x{len(c_dec):X}")
+        # The shell script uses the first three 8 MiB chunks from odd and even.
+        odd1 = odd[:SIZE_C_HALF]
+        even1 = even[:SIZE_C_HALF]
+        c_dec = interleave_odd_even(odd1, even1)
+        if len(c_dec) != SIZE_C_TOTAL:
+            raise ValueError(f"C intermediate size mismatch: expected 0x{SIZE_C_TOTAL:X}, got 0x{len(c_dec):X}")
 
-            c_dec_tmp = temp_path / "c_dec.tmp"
-            c_enc_tmp = temp_path / "c_enc.tmp"
-            write_bytes(c_dec_tmp, c_dec)
-            run_neo_cmc(neo_cmc, c_dec_tmp, 0, c_enc_tmp, "C")
-            c_enc = c_enc_tmp.read_bytes()
-            if len(c_enc) < SIZE_C_TOTAL:
-                raise ValueError(
-                    f"neo-cmc C output too small: expected 0x{SIZE_C_TOTAL:X}, got 0x{len(c_enc):X}"
-                )
+        c_enc = cmc50_gfx_encrypt(c_dec, extra_xor=0x31)
+        if len(c_enc) < SIZE_C_TOTAL:
+            raise ValueError(
+                f"CMC50 C output too small: expected 0x{SIZE_C_TOTAL:X}, got 0x{len(c_enc):X}"
+            )
 
-            odd_enc, even_enc = split_odd_even(c_enc[:SIZE_C_TOTAL])
-            if len(odd_enc) < SIZE_C_HALF or len(even_enc) < SIZE_C_HALF:
-                raise ValueError("Encrypted C odd/even split produced unexpected sizes")
+        odd_enc, even_enc = split_odd_even(c_enc[:SIZE_C_TOTAL])
+        if len(odd_enc) < SIZE_C_HALF or len(even_enc) < SIZE_C_HALF:
+            raise ValueError("Encrypted C odd/even split produced unexpected sizes")
 
-            for index, offset in [(1, 0x0000000), (3, 0x0800000), (5, 0x1000000)]:
-                add_zip_entry(zf, f"{ROM_ID}-c{index}.c{index}", odd_enc[offset:offset + SIZE_C_PART], report)
-            for index, offset in [(2, 0x0000000), (4, 0x0800000), (6, 0x1000000)]:
-                add_zip_entry(zf, f"{ROM_ID}-c{index}.c{index}", even_enc[offset:offset + SIZE_C_PART], report)
-
-    finally:
-        if temp_root is not None:
-            temp_root.cleanup()
+        for index, offset in [(1, 0x0000000), (3, 0x0800000), (5, 0x1000000)]:
+            add_zip_entry(zf, f"{ROM_ID}-c{index}.c{index}", odd_enc[offset:offset + SIZE_C_PART], report)
+        for index, offset in [(2, 0x0000000), (4, 0x0800000), (6, 0x1000000)]:
+            add_zip_entry(zf, f"{ROM_ID}-c{index}.c{index}", even_enc[offset:offset + SIZE_C_PART], report)
 
     return sorted(report, key=lambda item: item[0])
-
-
-
-def find_neo_cmc_for_module(module_folder: Path) -> str:
-    """
-    Find neo-cmc for extractor/module use.
-
-    Search order:
-      1. Platform-specific tool names
-      2. NeoGeo Extractor/tools/
-      3. NeoGeo Extractor/
-      4. game_modules/tools/
-      5. PATH
-    """
-    extractor_folder = module_folder.parent
-
-    neo_cmc_config = GAME.get("external_tools", {}).get("neo_cmc", {})
-
-    if isinstance(neo_cmc_config, dict):
-        system_name = platform.system()
-        names = neo_cmc_config.get(system_name, neo_cmc_config.get("default", ["neo-cmc"]))
-    else:
-        names = neo_cmc_config
-
-    candidates: list[Path] = []
-
-    for name in names:
-        candidates.extend(
-            [
-                extractor_folder / "tools" / name,
-                extractor_folder / name,
-                module_folder / "tools" / name,
-            ]
-        )
-
-    for candidate in candidates:
-        if candidate.is_file():
-            return str(candidate)
-
-    for name in names:
-        found = shutil.which(name)
-        if found:
-            return found
-
-    raise FileNotFoundError(
-        "Could not find neo-cmc. Put the correct platform binary in the extractor tools folder, "
-        "for example tools/neo-cmc-macos, tools/neo-cmc-linux, or tools/neo-cmc.exe."
-    )
 
 
 def run_custom_converter(
@@ -404,18 +298,15 @@ def run_custom_converter(
     This keeps Metal Slug 4-specific processing inside the game module while allowing
     the core to treat it as a detected game module.
     """
-    neo_cmc = find_neo_cmc_for_module(module_folder)
     output_zip = output_folder / "mslug4h.zip"
 
     log.append("Custom converter: Metal Slug 4 Code Mystics")
-    log.append(f"  neo-cmc: {neo_cmc}")
+    log.append("  Helpers: built-in Neo Geo PCM2 + CMC50")
     log.append(f"  Output ZIP: {output_zip}")
 
     report = convert(
         source_dir=source_folder,
         output_zip=output_zip,
-        neo_cmc_arg=neo_cmc,
-        keep_temp=False,
     )
 
     log.append("  Created ZIP contents:")
@@ -423,6 +314,7 @@ def run_custom_converter(
         log.append(f"    - {name}: size={size}, crc32={crc}")
 
     return True
+
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -434,13 +326,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=Path,
         help="Path to the Metal Slug 4 Data/rom folder containing p1.bin, m1.bin, v1.bin, c1.bin, s2.bin.",
     )
-    parser.add_argument(
-        "--neo-cmc",
-        default="./neo-cmc",
-        help="Path to neo-cmc executable. On Windows, usually .\\neo-cmc.exe. Default: ./neo-cmc",
-    )
+
     parser.add_argument("--output", default=f"{ZIP_NAME}.zip", type=Path, help="Output ZIP path. Default: mslug4h.zip")
-    parser.add_argument("--keep-temp", action="store_true", help="Keep temporary files beside the output ZIP for debugging.")
     return parser.parse_args(argv)
 
 
@@ -448,7 +335,7 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
 
     try:
-        report = convert(args.source, args.output, args.neo_cmc, args.keep_temp)
+        report = convert(args.source, args.output)
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

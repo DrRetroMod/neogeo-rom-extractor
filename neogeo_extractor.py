@@ -77,6 +77,17 @@ This version supports:
 - per-game logs
 """
 
+# Implementation notes:
+# This core extractor was developed through source-file analysis, local testing,
+# hash comparison, and comparison with public Neo Geo extraction, emulation,
+# and preservation research.
+#
+# The core is intended to remain general-purpose. Game-specific extraction
+# behaviour, offsets, hashes, patch rules, and quirks belong in the individual
+# game modules under project_files/game_modules/.
+#
+# See README.md -> Credits and Acknowledgements for full project-wide credits.
+
 from __future__ import annotations
 
 import argparse

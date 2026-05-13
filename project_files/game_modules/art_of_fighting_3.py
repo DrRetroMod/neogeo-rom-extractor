@@ -33,6 +33,17 @@ included, matching the current framework decision to output only the validated
 MAME-compatible game ZIP.
 """
 
+# Extraction notes:
+# This module was developed through source-file analysis, local testing,
+# hash comparison, and comparison with public Neo Geo extraction, emulation,
+# and preservation research.
+#
+# Extraction behaviour in this module was informed in part by NGPrimeClaim
+# by Lx32:
+# https://github.com/Lx32/NGPrimeClaim
+#
+# See README.md -> Credits and Acknowledgements for full project-wide credits.
+
 NEOGEO_C1_TILE_DECODE = {
     "type": "neogeo_4bpp_tile_decode",
     "source_file": "c1.bin",
