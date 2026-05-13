@@ -25,7 +25,7 @@ The following games are supported (29 in total so far):
 - Magician Lord
 - Metal Slug
 - Metal Slug 2
-- Metal Slug 3?? (Currently Working On, Not Yet Working)
+- Metal Slug 3?? (Currently Working On, Not Yet Implimented)
 - Metal Slug 4
 - Metal Slug X
 - Mutation Nation
