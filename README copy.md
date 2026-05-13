@@ -1,16 +1,16 @@
-# NeoGeo ROM Extractor 
+# NeoGeo ROM Extractor
 
 A modular, preservation-focused Python extractor for rebuilding verified Neo Geo ROM ZIPs from supported legally owned PC releases.
 
 This project is designed to help users extract ROM data from game releases they already own, then rebuild emulator-ready Neo Geo ROM ZIPs using per-game extraction modules.
 
-## Project Status 
+## Project Status
 
 This project is in active development.
 
 Supported games are added through individual game modules in the `game_modules/` folder. Each module defines the source layout, expected file slices, output names, hashes, and any game-specific extraction behaviour required for that title.
 
-## Currently Supported Games 
+## Currently Supported Games
 
 The following games are supported (29 in total so far):
 
@@ -25,7 +25,6 @@ The following games are supported (29 in total so far):
 - Magician Lord
 - Metal Slug
 - Metal Slug 2
-- Metal Slug 3?? (Currently Working On, Not Yet Working)
 - Metal Slug 4
 - Metal Slug X
 - Mutation Nation
@@ -45,7 +44,7 @@ The following games are supported (29 in total so far):
 - Top Hunter
 - Twinkle Star Sprites
 
-## Features 
+## Features
 
 - Modular per-game extraction system
 - General-purpose extraction core
@@ -55,13 +54,13 @@ The following games are supported (29 in total so far):
 - Designed for preservation and personal-use extraction workflows
 - No ROMs, BIOS files, or copyrighted game assets included
 
-## Supported Sources 
+## Supported Sources
 
 This extractor is intended for supported PC releases of Neo Geo games, such as legally purchased storefront releases where the required source data is available locally.
 
 Support varies per game. Each supported title requires a matching game module.
 
-## Project Structure 
+## Project Structure
 
 ```text
 NeoGeo ROM Extractor/
@@ -77,7 +76,7 @@ NeoGeo ROM Extractor/
 └── LICENSE
 ```
 
-## Requirements 
+## Requirements
 
 - Python 3.10 or newer recommended
 - A legally owned supported game release
@@ -85,7 +84,7 @@ NeoGeo ROM Extractor/
 
 No ROMs or copyrighted files are provided by this project.
 
-## Basic Usage 
+## Basic Usage
 
 Run the extractor from the command line:
 
@@ -107,7 +106,7 @@ Example on Windows:
 python neogeo_extractor.py "C:\Path\To\Source\Files" "C:\Path\To\Output"
 ```
 
-## Game Modules 
+## Game Modules
 
 Each game module lives in:
 
@@ -130,19 +129,21 @@ Examples of game-specific data include:
 
 The main extractor should remain as generic as possible.
 
-## Output 
+## Output
 
 The extractor creates rebuilt ROM ZIPs for supported games when the source files match the expected data.
 
+Where applicable, the extractor may also create preservation-oriented secondary outputs, such as original/unmodified file ZIPs, if a supported source requires patching or correction.
+
 Output files are generated locally and are not included in this repository.
 
-## Verification 
+## Verification
 
 This project is verification-focused.
 
 Where possible, extracted files are checked against expected hashes before final ZIP creation. If source files do not match the expected data, the extractor should fail rather than silently creating incorrect output.
 
-## What This Project Does Not Include 
+## What This Project Does Not Include
 
 This repository does not include:
 
@@ -158,78 +159,22 @@ This repository does not include:
 
 ## Credits and Acknowledgements
 
-This project was informed by, adapted from, or cross-checked against earlier Neo Geo extraction, conversion, preservation, and emulation work.
-
-Some sources were used as direct implementation references. Others were used for research, comparison, testing, or validation only. Inclusion here does not necessarily mean that code from that source is included in this repository.
-
-### Projects and code references
-
-The following projects were useful while developing this extractor:
+Parts of this project were informed by, adapted from, or cross-checked against earlier Neo Geo extraction work, including:
 
 - [NGPrimeClaim](https://github.com/Lx32/NGPrimeClaim) by Lx32
 - [mslug-rom-extractor](https://github.com/terminatorhex/mslug-rom-extractor) by terminatorhex
-- [goNCommand](https://github.com/lioneltrs/goNCommand) by Lionel Cordesses
 
-Where code, logic, offsets, extraction layouts, patch behaviour, conversion behaviour, or command-line workflows have been adapted from these projects, credit should also remain in the relevant source files or game modules.
+These projects were useful references for understanding Neo Geo ROM extraction layouts and workflows. This repository is not affiliated with, endorsed by, or maintained by the authors of those projects.
 
-### Research notes and discussions
+Where code or logic has been adapted from those repositories, it should remain credited in the relevant source files as well as here.
 
-The following public notes, blog posts, scripts, and discussions were also used for research, comparison, or cross-checking:
-
-- [goNCommand issue #13](https://github.com/lioneltrs/goNCommand/issues/13)
-- alhumbra’s notes: https://milkchoco.info/archives/8695
-- scrap-a’s notes: http://blog.livedoor.jp/scrap_a/archives/37910430.html
-- Tomasz Bednarz’s related work and notes, 2023
-- Lionel Cordesses’ KOF 2003 extraction/build script work, 2025
-
-These references were especially useful for understanding The King of Fighters 2003, CMC-related processing, encrypted Neo Geo content, and ROM-set reconstruction.
-
-### Tools, algorithms, and reimplemented processing
-
-Some extraction steps use, reproduce, or reimplement behaviour from earlier tools, scripts, or commercial release workflows.
-
-- `neo-cmc` is used or referenced for CMC-related Neo Geo processing.
-- `tileswap` logic is used or reimplemented for graphics/tile data rearrangement where required.
-- `tiles2crom` logic is used or reimplemented for converting tile data into Neo Geo C-ROM-compatible output where required.
-- `unswizzle` logic was initially based largely on NGPrimeClaim and has been adapted for this project.
-- For Metal Slug 3, parts of the Python implementation were developed by studying and replacing the behaviour of the original `prog.exe` workflow from the legally obtained release.
-
-Where these behaviours are implemented in this repository, the relevant source files should also include local credit comments explaining which external project, tool, script, or workflow informed that implementation.
-
-This project does not redistribute `prog.exe`, commercial game executables, ROMs, BIOS files, encryption keys, or copyrighted game assets.
-
-### Emulator and validation references
-
-Extracted files are checked against known emulator-compatible ROM layouts, names, sizes, and hashes where possible. Thanks are due to the contributors and maintainers of:
-
-- [MAME](https://www.mamedev.org/)
-- [FBNeo](https://github.com/finalburnneo/FBNeo)
-
-Their ROM definitions, naming conventions, hash records, and long-term hardware documentation work are important validation references for this project.
-
-### Affiliation disclaimer
-
-This repository is not affiliated with, endorsed by, or maintained by SNK, Amazon, GOG, Steam, DotEmu, Code Mystics, MAME, FBNeo, Lx32, terminatorhex, Lionel Cordesses, Shigeshigeru, alhumbra, scrap-a, Tomasz Bednarz, or any other referenced project, contributor, publisher, distributor, or rights holder.
-
-Use of a source as a reference does not necessarily mean this repository contains code from that source. Some sources were used only for comparison, verification, or background research.
-
-Any mistakes, omissions, or project-specific implementation choices in this repository are my own.
-
-### Affiliation disclaimer for credited sources (new)
-
-This repository is not affiliated with, endorsed by, or maintained by SNK, Amazon, GOG, Steam, DotEmu, Code Mystics, MAME, FBNeo, Lx32, terminatorhex, Lionel Cordesses, Shigeshigeru, alhumbra, scrap-a, Tomasz Bednarz, or any other referenced project, contributor, publisher, distributor, or rights holder.
-
-Use of a source as a reference does not necessarily mean this repository contains code from that source. Some sources were used only for comparison, verification, or background research.
-
-Any mistakes, omissions, or project-specific implementation choices in this repository are my own.
-
-## Disclaimer 
+## Disclaimer
 
 This project is provided for educational, preservation, and personal backup purposes.
 
 The author is not responsible for how users obtain, use, distribute, or handle copyrighted material. Users are responsible for complying with all applicable laws in their own country or region.
 
-## Contributing 
+## Contributing
 
 Contributions may be considered once the project structure has stabilised.
 
@@ -243,13 +188,13 @@ Useful contributions include:
 
 Do not submit ROMs, BIOS files, copyrighted game data, or proprietary assets.
 
-## Suggested GitHub Topics 
+## Suggested GitHub Topics
 
 ```text
 neogeo neo-geo snk rom-extractor rom-extraction game-preservation digital-preservation python emulation-tools arcade retro-gaming mame
 ```
 
-## Legal Notice 
+## Legal Notice
 
 This project does **not** include, distribute, download, or provide access to ROMs, BIOS files, game executables, game data, or any other copyrighted assets.
 
@@ -261,8 +206,8 @@ Do not use this project to obtain, distribute, or share copyrighted game data th
 
 The author does not endorse piracy or copyright infringement.
 
-## License (GPLv3) 
+## License (GPLv3)
 
 This project is released under the GPLv3 license, specified in the `LICENSE` file.
 
-You may use, modify, and redistribute this extractor, but if you redistribute it or modify versions, you must keep it under GPLv3 and provide the source code.
+You may use, modify, and redistribute this extractor, but if you redistribute it or modified versions, you must keep it under GPLv3 and provide the source code.
