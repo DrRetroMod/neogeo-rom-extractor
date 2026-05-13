@@ -125,6 +125,7 @@ class GameModule:
     module_path: Path
     module_name: str
     game: dict[str, Any]
+    loaded_module: Any
 
 
 @dataclass
@@ -348,6 +349,7 @@ def load_game_modules() -> list[GameModule]:
                 module_path=module_path,
                 module_name=module_name,
                 game=game,
+                loaded_module=loaded_module,
             )
         )
 
@@ -1997,6 +1999,59 @@ def process_game(
             log,
             verbose=True,
         )
+
+    custom_converter = getattr(module.loaded_module, "run_custom_converter", None)
+
+    if callable(custom_converter):
+        log.append("Custom converter: RUN")
+        print("  Running custom converter")
+
+        try:
+            custom_converter(
+                source_folder=detection.source_folder,
+                output_folder=output_game_folder,
+                module_folder=module.module_path.parent,
+                log=log,
+            )
+
+            log.append("")
+            log.append("Result: SUCCESS")
+
+            log_path = output_game_folder / f"{safe_title} extraction log.txt"
+            log_path.write_text("\n".join(log) + "\n", encoding="utf-8")
+
+            return GameProcessResult(
+                game_id=game_id,
+                title=title,
+                success=True,
+                status="SUCCESS",
+                output_folder=output_game_folder,
+                log_path=log_path,
+            )
+
+        except Exception as error:
+            log.append("")
+            log.append("Result: FAILED")
+            log.append(f"Reason: custom converter failed: {error}")
+
+            failed_folder = FAILED_DIR / f"{safe_title} - {timestamp()}"
+            failed_folder.mkdir(parents=True, exist_ok=True)
+
+            log_path = failed_folder / f"{safe_title} extraction log.txt"
+            log_path.write_text("\n".join(log) + "\n", encoding="utf-8")
+
+            if output_game_folder.exists():
+                shutil.rmtree(output_game_folder, ignore_errors=True)
+
+            return GameProcessResult(
+                game_id=game_id,
+                title=title,
+                success=False,
+                status="FAILED",
+                output_folder=failed_folder,
+                log_path=log_path,
+                reason=f"Custom converter failed: {error}",
+            )
 
     built_files: dict[str, Path] = {}
     failed_files: list[FileBuildResult] = []
