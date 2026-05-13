@@ -26,16 +26,23 @@ Expected structure:
 NeoGeo Games Root/
 ├─ NeoGeo Extractor/
 │  ├─ neogeo_extractor.py
-│  ├─ game_modules/
-│  │  ├─ __init__.py
-│  │  └─ three_count_bout.py
-│  ├─ temp/
-│  ├─ extracted_neogeo/
-│  ├─ backups/
-│  │  ├─ temp/
-│  │  └─ extracted_neogeo/
-│  ├─ failed/
-│  └─ batch_logs/
+│  ├─ extracted_neogeo_games/
+│  ├─ extracted_bios/
+│  │  ├─ neogeo.zip
+│  │  └─ unzipped/
+│  └─ project_files/
+│     ├─ game_modules/
+│     │  ├─ __init__.py
+│     │  ├─ patch_data/
+│     │  └─ three_count_bout.py
+│     ├─ bios/
+│     │  ├─ __init__.py
+│     │  └─ neogeo_bios.py
+│     ├─ tools/
+│     ├─ temp/
+│     ├─ backups/
+│     ├─ failed/
+│     └─ logs/
 │
 ├─ 3 Count Bout/
 ├─ Metal Slug 4/
@@ -78,6 +85,7 @@ import hashlib
 import importlib.util
 import json
 import shutil
+import sys
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -92,29 +100,55 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 SCAN_ROOT = SCRIPT_DIR.parent
 
-MODULES_DIR = SCRIPT_DIR / "game_modules"
-PATCH_DATA_DIR = MODULES_DIR / "patch_data"
-TEMP_DIR = SCRIPT_DIR / "temp"
-OUTPUT_DIR = SCRIPT_DIR / "extracted_neogeo"
+PROJECT_FILES_DIR = SCRIPT_DIR / "project_files"
 
-BACKUPS_DIR = SCRIPT_DIR / "backups"
-FAILED_DIR = SCRIPT_DIR / "failed"
-BATCH_LOGS_DIR = SCRIPT_DIR / "batch_logs"
+MODULES_DIR = PROJECT_FILES_DIR / "game_modules"
+PATCH_DATA_DIR = MODULES_DIR / "patch_data"
+
+BIOS_CODE_DIR = PROJECT_FILES_DIR / "bios"
+TOOLS_DIR = PROJECT_FILES_DIR / "tools"
+TEMP_DIR = PROJECT_FILES_DIR / "temp"
+BACKUPS_DIR = PROJECT_FILES_DIR / "backups"
+FAILED_DIR = PROJECT_FILES_DIR / "failed"
+BATCH_LOGS_DIR = PROJECT_FILES_DIR / "logs"
+
+OUTPUT_DIR = SCRIPT_DIR / "extracted_neogeo_games"
+
+EXTRACTED_BIOS_DIR = SCRIPT_DIR / "extracted_bios"
+MASTER_BIOS_DIR = EXTRACTED_BIOS_DIR
+MASTER_BIOS_ZIP = EXTRACTED_BIOS_DIR / "neogeo.zip"
+MASTER_BIOS_UNZIPPED_DIR = EXTRACTED_BIOS_DIR / "unzipped"
+
+# Make project_files importable so project_files/bios/neogeo_bios.py can be imported.
+if str(PROJECT_FILES_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_FILES_DIR))
+
+try:
+    from bios.neogeo_bios import collect_neogeo_bios
+    BIOS_IMPORT_ERROR = None
+except ImportError as error:
+    collect_neogeo_bios = None
+    BIOS_IMPORT_ERROR = error
 
 IGNORED_DIR_NAMES = {
+    PROJECT_FILES_DIR.name,
+    OUTPUT_DIR.name,
+    EXTRACTED_BIOS_DIR.name,
     "game_modules",
     "temp",
+    "extracted_neogeo_games",
+    "extracted_games",
     "extracted_neogeo",
     "backups",
     "failed",
     "batch_logs",
+    "logs",
     "__pycache__",
     ".git",
     "_backups",
     "_failed",
     "_batch_logs",
 }
-
 
 # ------------------------------------------------------------
 # Data containers
@@ -206,17 +240,30 @@ def sanitize_folder_name(value: str) -> str:
 
 
 def ensure_base_folders() -> None:
-    MODULES_DIR.mkdir(exist_ok=True)
-    PATCH_DATA_DIR.mkdir(exist_ok=True)
-    TEMP_DIR.mkdir(exist_ok=True)
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    BACKUPS_DIR.mkdir(exist_ok=True)
-    FAILED_DIR.mkdir(exist_ok=True)
-    BATCH_LOGS_DIR.mkdir(exist_ok=True)
+    PROJECT_FILES_DIR.mkdir(parents=True, exist_ok=True)
 
-    init_file = MODULES_DIR / "__init__.py"
-    if not init_file.exists():
-        init_file.write_text("", encoding="utf-8")
+    MODULES_DIR.mkdir(parents=True, exist_ok=True)
+    PATCH_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    BIOS_CODE_DIR.mkdir(parents=True, exist_ok=True)
+    TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+    FAILED_DIR.mkdir(parents=True, exist_ok=True)
+    BATCH_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    EXTRACTED_BIOS_DIR.mkdir(parents=True, exist_ok=True)
+    MASTER_BIOS_UNZIPPED_DIR.mkdir(parents=True, exist_ok=True)
+
+    module_init_file = MODULES_DIR / "__init__.py"
+    if not module_init_file.exists():
+        module_init_file.write_text("", encoding="utf-8")
+
+    bios_init_file = BIOS_CODE_DIR / "__init__.py"
+    if not bios_init_file.exists():
+        bios_init_file.write_text("", encoding="utf-8")
 
 
 def backup_existing_folder(folder: Path, backup_root: Path) -> Path | None:
@@ -632,7 +679,7 @@ def collect_existing_zips_for_game(
             output_folder=existing_zip_output_folder,
         )
 
-    backup_existing_folder(existing_zip_output_folder, BACKUPS_DIR / "extracted_neogeo")
+    backup_existing_folder(existing_zip_output_folder, BACKUPS_DIR / "extracted_neogeo_games")
 
     existing_zip_output_folder.mkdir(parents=True, exist_ok=True)
 
@@ -662,7 +709,14 @@ def collect_existing_zips_for_game(
         log.append("Copied files:")
 
     for source_zip in candidate_zips:
-        destination_zip = unique_destination_path(existing_zip_output_folder, source_zip.name)
+        if source_zip.name.casefold() == "neogeo.zip":
+            destination_folder = existing_zip_output_folder / "bios"
+        else:
+            destination_folder = existing_zip_output_folder
+
+        destination_folder.mkdir(parents=True, exist_ok=True)
+
+        destination_zip = unique_destination_path(destination_folder, source_zip.name)
         shutil.copy2(source_zip, destination_zip)
         copied_files.append(destination_zip)
 
@@ -678,6 +732,15 @@ def collect_existing_zips_for_game(
 
     if not copied_files:
         lines.append("  none")
+
+    collected_neogeo_zip = existing_zip_output_folder / "bios" / "neogeo.zip"
+
+    if collected_neogeo_zip.is_file():
+        process_collected_neogeo_zip(
+            neogeo_zip_path=collected_neogeo_zip,
+            game_bios_folder=existing_zip_output_folder / "bios",
+            log_lines=lines,
+        )
 
     log_path = existing_zip_output_folder / "existing ZIP collection log.txt"
     log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -819,6 +882,60 @@ def find_zip_files_under(folder: Path) -> list[Path]:
 
     return sorted(zip_files)
 
+def process_collected_neogeo_zip(
+    *,
+    neogeo_zip_path: Path,
+    game_bios_folder: Path,
+    log_lines: list[str],
+) -> None:
+    unzipped_bios_folder = game_bios_folder / "unzipped"
+    unzipped_bios_folder.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(neogeo_zip_path, "r") as zf:
+        zf.extractall(unzipped_bios_folder)
+
+    log_lines.append(f"  Extracted neogeo.zip to: {unzipped_bios_folder}")
+
+    log_lines.append("  Extracted files:")
+    for file_path in sorted(unzipped_bios_folder.rglob("*")):
+        if file_path.is_file():
+            data = read_bytes_from_file(file_path)
+            log_lines.append(
+                f"    - {file_path.relative_to(unzipped_bios_folder)} "
+                f"size={len(data)} crc32={crc32_hex(data)} sha1={sha1_hex(data)}"
+            )
+
+    # Rebuild the game-folder bios/neogeo.zip from the unzipped source contents.
+    if neogeo_zip_path.exists():
+        neogeo_zip_path.unlink()
+
+    with zipfile.ZipFile(neogeo_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for file_path in sorted(unzipped_bios_folder.rglob("*")):
+            if file_path.is_file():
+                zf.write(file_path, arcname=file_path.relative_to(unzipped_bios_folder))
+
+    log_lines.append(f"  Rebuilt game BIOS ZIP: {neogeo_zip_path}")
+
+    # Scan extracted BIOS files for master BIOS collection.
+    # Use a temporary game output so this does not overwrite the rebuilt source neogeo.zip.
+    temp_verified_folder = game_bios_folder / "_verified_temp"
+
+    if collect_neogeo_bios is None:
+        log_lines.append(
+            f"  BIOS module scan skipped: BIOS module could not be imported: {BIOS_IMPORT_ERROR}"
+        )
+        return
+
+    collect_neogeo_bios(
+        scan_root=unzipped_bios_folder,
+        game_bios_output_dir=temp_verified_folder,
+        master_bios_output_dir=MASTER_BIOS_DIR,
+    )
+
+    if temp_verified_folder.exists():
+        shutil.rmtree(temp_verified_folder, ignore_errors=True)
+
+    log_lines.append("  BIOS module scanned extracted neogeo.zip contents for master BIOS collection.")
 
 def collect_existing_zips_from_folder(
     source_root: Path,
@@ -855,7 +972,7 @@ def collect_existing_zips_from_folder(
             output_folder=existing_zip_output_folder,
         )
 
-    backup_existing_folder(existing_zip_output_folder, BACKUPS_DIR / "extracted_neogeo")
+    backup_existing_folder(existing_zip_output_folder, BACKUPS_DIR / "extracted_neogeo_games")
     existing_zip_output_folder.mkdir(parents=True, exist_ok=True)
 
     copied_files: list[Path] = []
@@ -876,7 +993,14 @@ def collect_existing_zips_from_folder(
     lines.append("Copied ZIP files:")
 
     for source_zip in candidate_zips:
-        destination_zip = unique_destination_path(existing_zip_output_folder, source_zip.name)
+        if source_zip.name.casefold() == "neogeo.zip":
+            destination_folder = existing_zip_output_folder / "bios"
+        else:
+            destination_folder = existing_zip_output_folder
+
+        destination_folder.mkdir(parents=True, exist_ok=True)
+
+        destination_zip = unique_destination_path(destination_folder, source_zip.name)
         shutil.copy2(source_zip, destination_zip)
         copied_files.append(destination_zip)
 
@@ -886,6 +1010,15 @@ def collect_existing_zips_from_folder(
             relative_source = source_zip
 
         lines.append(f"  - {relative_source} -> {destination_zip.name}")
+
+    collected_neogeo_zip = existing_zip_output_folder / "bios" / "neogeo.zip"
+
+    if collected_neogeo_zip.is_file():
+        process_collected_neogeo_zip(
+            neogeo_zip_path=collected_neogeo_zip,
+            game_bios_folder=existing_zip_output_folder / "bios",
+            log_lines=lines,
+        )
 
     log_path = existing_zip_output_folder / "existing ZIP collection log.txt"
     log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -1925,6 +2058,35 @@ def create_zip(
     log.append(f"  ZIP written: {zip_path}")
     return True
 
+def run_bios_collection_after_game(
+    *,
+    source_folder: Path,
+    output_game_folder: Path,
+    log: list[str],
+) -> None:
+    log.append("")
+    log.append("BIOS collection: RUN")
+
+    if collect_neogeo_bios is None:
+        log.append("  Result: skipped")
+        log.append(f"  Reason: BIOS module could not be imported: {BIOS_IMPORT_ERROR}")
+        print(f"  BIOS collection: skipped, BIOS module could not be imported: {BIOS_IMPORT_ERROR}")
+        return
+
+    try:
+        collect_neogeo_bios(
+            scan_root=source_folder,
+            game_bios_output_dir=output_game_folder / "bios",
+            master_bios_output_dir=MASTER_BIOS_DIR,
+        )
+
+        log.append(f"  Game BIOS folder:   {output_game_folder / 'bios'}")
+        log.append(f"  Master BIOS folder: {MASTER_BIOS_DIR}")
+        log.append("  Result: complete")
+
+    except Exception as error:
+        log.append("  Result: failed")
+        log.append(f"  Reason: {error}")
 
 def process_game(
     module: GameModule,
@@ -1984,7 +2146,7 @@ def process_game(
 
     backup_existing_folder(temp_game_folder, BACKUPS_DIR / "temp")
     if backup_output:
-        backup_existing_folder(output_game_folder, BACKUPS_DIR / "extracted_neogeo")
+        backup_existing_folder(output_game_folder, BACKUPS_DIR / "extracted_neogeo_games")
 
     temp_game_folder.mkdir(parents=True, exist_ok=True)
     (temp_game_folder / "zip_staging").mkdir(parents=True, exist_ok=True)
@@ -2011,6 +2173,12 @@ def process_game(
                 source_folder=detection.source_folder,
                 output_folder=output_game_folder,
                 module_folder=module.module_path.parent,
+                log=log,
+            )
+
+            run_bios_collection_after_game(
+                source_folder=detection.source_folder,
+                output_game_folder=output_game_folder,
                 log=log,
             )
 
@@ -2135,6 +2303,12 @@ def process_game(
             reason="ZIP creation failed.",
         )
 
+    run_bios_collection_after_game(
+        source_folder=detection.source_folder,
+        output_game_folder=output_game_folder,
+        log=log,
+    )
+
     log.append("")
     log.append("Result: SUCCESS")
 
@@ -2158,14 +2332,21 @@ def process_game(
 def print_paths() -> None:
     print()
     print("Paths:")
-    print(f"  Extractor folder: {SCRIPT_DIR}")
-    print(f"  Scan root:        {SCAN_ROOT}")
-    print(f"  Modules folder:   {MODULES_DIR}")
-    print(f"  Temp folder:      {TEMP_DIR}")
-    print(f"  Output folder:    {OUTPUT_DIR}")
-    print(f"  Backups folder:   {BACKUPS_DIR}")
-    print(f"  Failed folder:    {FAILED_DIR}")
-    print(f"  Batch logs folder:{BATCH_LOGS_DIR}")
+    print(f"  Extractor folder:            {SCRIPT_DIR}")
+    print(f"  Scan root:                   {SCAN_ROOT}")
+    print(f"  Project files folder:        {PROJECT_FILES_DIR}")
+    print(f"  Modules folder:              {MODULES_DIR}")
+    print(f"  Patch data folder:           {PATCH_DATA_DIR}")
+    print(f"  BIOS code folder:            {BIOS_CODE_DIR}")
+    print(f"  Tools folder:                {TOOLS_DIR}")
+    print(f"  Temp folder:                 {TEMP_DIR}")
+    print(f"  Extracted NeoGeo games:      {OUTPUT_DIR}")
+    print(f"  Extracted BIOS folder:       {EXTRACTED_BIOS_DIR}")
+    print(f"  Master BIOS ZIP:             {MASTER_BIOS_ZIP}")
+    print(f"  Master BIOS unzipped folder: {MASTER_BIOS_UNZIPPED_DIR}")
+    print(f"  Backups folder:              {BACKUPS_DIR}")
+    print(f"  Failed folder:               {FAILED_DIR}")
+    print(f"  Logs folder:                 {BATCH_LOGS_DIR}")
     print()
 
 

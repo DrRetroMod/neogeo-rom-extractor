@@ -423,12 +423,6 @@ Useful contributions include:
 
 Do not submit ROMs, BIOS files, copyrighted game data, or proprietary assets.
 
-## Suggested GitHub Topics 
-
-```text
-neogeo neo-geo snk rom-extractor rom-extraction game-preservation digital-preservation python emulation-tools arcade retro-gaming mame
-```
-
 ## Legal Notice 
 
 This project does **not** include, distribute, download, or provide access to ROMs, BIOS files, game executables, game data, or any other copyrighted assets.
