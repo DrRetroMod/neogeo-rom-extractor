@@ -21,17 +21,19 @@
 """
 Neo Geo BIOS collector for the NeoGeo ROM Extractor.
 
-Phase 1 behaviour:
+Current behaviour:
 - scan a game's source folder after that individual game extraction completes
 - match raw files by size + CRC32 + SHA1 against MAME's neogeo.zip BIOS entries
-- copy every confirmed match into that game's output/bios folder
-- rebuild that game's output/bios/neogeo.zip every run from that game's confirmed loose BIOS files
-- optionally maintain a shared master bios folder
-- add only newly discovered files to the master bios folder
+- detect Dotemu-style files containing "bios_sfix" in the filename
+- re-encode matching bios_sfix files into standard sfix.sfix layout
+- copy every confirmed match into that game's output/bios/unzipped folder
+- rebuild that game's output/bios/neogeo.zip every run from output/bios/unzipped
+- optionally maintain a shared master bios/unzipped folder
+- add only newly discovered files to the master bios/unzipped folder
 - rebuild master bios/neogeo.zip only when a new master BIOS file was added
-- ignore non-matching files, including Code Mystics-only candidates for now
+- ignore non-matching files
 
-No transformations, slicing, patching, or speculative BIOS handling are performed here.
+No slicing, patching, or speculative BIOS handling is performed here.
 """
 
 from __future__ import annotations
@@ -94,6 +96,7 @@ class BiosMatch:
     size: int
     crc32: str
     sha1: str
+    data: bytes | None = None
 
 
 @dataclass(frozen=True)
@@ -124,6 +127,63 @@ def _file_hashes(path: Path) -> tuple[int, str, str]:
 
     return size, f"{crc & 0xFFFFFFFF:08x}", sha1.hexdigest()
 
+def _data_hashes(data: bytes) -> tuple[int, str, str]:
+    return (
+        len(data),
+        f"{zlib.crc32(data) & 0xFFFFFFFF:08x}",
+        hashlib.sha1(data).hexdigest(),
+    )
+
+
+def dotemu_sfix_reencode_source_bytes(data: bytes) -> bytes:
+    if len(data) % 32 != 0:
+        raise ValueError(
+            f"Dotemu SFIX source size must be divisible by 32, got {len(data)}"
+        )
+
+    output = bytearray()
+    buffer = bytearray(32)
+
+    for i in range(0, len(data), 32):
+        for j in range(0, 8):
+            buffer[0 + j] = data[i + j * 4 + 2]
+            buffer[8 + j] = data[i + j * 4 + 3]
+            buffer[16 + j] = data[i + j * 4]
+            buffer[24 + j] = data[i + j * 4 + 1]
+
+        output.extend(buffer)
+
+    return bytes(output)
+
+
+def _try_bios_sfix_reencode(path: Path) -> BiosMatch | None:
+    if "bios_sfix" not in path.name.lower():
+        return None
+
+    try:
+        source_data = path.read_bytes()
+        reencoded = dotemu_sfix_reencode_source_bytes(source_data)
+    except ValueError:
+        return None
+
+    size, crc32, sha1 = _data_hashes(reencoded)
+    expected = NEOGEO_BIOS_FILES["sfix.sfix"]
+
+    if (
+        size == int(expected["size"])
+        and crc32 == str(expected["crc32"]).lower()
+        and sha1 == str(expected["sha1"]).lower()
+    ):
+        return BiosMatch(
+            source_path=path,
+            output_name="sfix.sfix",
+            size=size,
+            crc32=crc32,
+            sha1=sha1,
+            data=reencoded,
+        )
+
+    return None
 
 def _build_lookup() -> dict[tuple[int, str, str], str]:
     """Map (size, crc32, sha1) to the correct neogeo.zip member filename."""
@@ -183,6 +243,11 @@ def scan_for_neogeo_bios(
         if path.name.lower() == NEOGEO_BIOS_ZIP_NAME:
             continue
 
+        sfix_match = _try_bios_sfix_reencode(path)
+        if sfix_match is not None:
+            matches_by_name.setdefault("sfix.sfix", sfix_match)
+            continue
+
         size, crc32, sha1 = _file_hashes(path)
         output_name = lookup.get((size, crc32, sha1))
         if not output_name:
@@ -232,6 +297,12 @@ def rebuild_neogeo_zip(bios_output_dir: str | os.PathLike[str]) -> Path | None:
 
     return zip_path
 
+def _write_or_copy_match(match: BiosMatch, destination: Path) -> None:
+    if match.data is not None:
+        destination.write_bytes(match.data)
+    else:
+        shutil.copy2(match.source_path, destination)
+
 def _copy_matches_to_game_bios(
     matches: list[BiosMatch],
     game_bios_dir: Path,
@@ -258,11 +329,11 @@ def _copy_matches_to_game_bios(
                 game_skipped_existing.append(match.output_name)
                 continue
             game_conflicts.append(match.output_name)
-            shutil.copy2(match.source_path, destination)
+            _write_or_copy_match(match, destination)
             game_replaced_files.append(match.output_name)
             continue
 
-        shutil.copy2(match.source_path, destination)
+        _write_or_copy_match(match, destination)
         game_new_files.append(match.output_name)
 
     return game_new_files, game_replaced_files, game_skipped_existing, game_conflicts
@@ -294,7 +365,7 @@ def _copy_matches_to_master_bios(
                 master_conflicts.append(match.output_name)
             continue
 
-        shutil.copy2(match.source_path, destination)
+        _write_or_copy_match(match, destination)
         master_new_files.append(match.output_name)
 
     return master_new_files, master_skipped_existing, master_conflicts
