@@ -31,7 +31,11 @@ Current behaviour:
 - optionally maintain a shared master bios/unzipped folder
 - add only newly discovered files to the master bios/unzipped folder
 - rebuild master bios/neogeo.zip only when a new master BIOS file was added
-- ignore non-matching files
+- detect selected non-standard extra BIOS files such as sp_4s.bin
+- copy non-standard extra BIOS files into bios/non_standard_extra_bios/unzipped
+- create neogeo_with_non_standard_extra_bios.zip only when non-standard extra BIOS files are present
+- include confirmed standard BIOS files plus non-standard extra BIOS files in that extra ZIP
+- ignore other non-matching files
 
 No slicing, patching, or speculative BIOS handling is performed here.
 """
@@ -48,6 +52,11 @@ from pathlib import Path
 
 
 NEOGEO_BIOS_ZIP_NAME = "neogeo.zip"
+NEOGEO_EXTRA_BIOS_ZIP_NAME = "neogeo_with_non_standard_extra_bios.zip"
+
+NON_STANDARD_EXTRA_BIOS_FILES = {
+    "sp_4s.bin",
+}
 
 # Unique ROM entries from the uploaded MAME_BIOS_287.dat machine name="neogeo".
 # The DAT contains 35 entries, but sm1.sm1 is duplicated, so this table has 34 unique files.
@@ -107,10 +116,16 @@ class BiosCollectResult:
     game_skipped_existing: list[str]
     game_conflicts: list[str]
     game_zip_rebuilt: bool
+    game_extra_new_files: list[str]
+    game_extra_skipped_existing: list[str]
+    game_extra_zip_rebuilt: bool
     master_new_files: list[str]
     master_skipped_existing: list[str]
     master_conflicts: list[str]
     master_zip_rebuilt: bool
+    master_extra_new_files: list[str]
+    master_extra_skipped_existing: list[str]
+    master_extra_zip_rebuilt: bool
 
 
 def _file_hashes(path: Path) -> tuple[int, str, str]:
@@ -297,6 +312,96 @@ def rebuild_neogeo_zip(bios_output_dir: str | os.PathLike[str]) -> Path | None:
 
     return zip_path
 
+def scan_for_non_standard_extra_bios(
+    scan_root: str | os.PathLike[str],
+    *skip_dirs: str | os.PathLike[str] | None,
+) -> list[Path]:
+    root = Path(scan_root).resolve()
+    resolved_skip_dirs = [Path(d).resolve() for d in skip_dirs if d is not None]
+    matches_by_name: dict[str, Path] = {}
+
+    if not root.exists():
+        return []
+
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+
+        if any(_is_inside(path, skip_dir) for skip_dir in resolved_skip_dirs):
+            continue
+
+        name = path.name.lower()
+
+        if name in NON_STANDARD_EXTRA_BIOS_FILES:
+            matches_by_name.setdefault(name, path)
+
+    return [matches_by_name[name] for name in sorted(matches_by_name)]
+
+
+def _copy_extra_bios_files(
+    extra_paths: list[Path],
+    bios_dir: Path,
+) -> tuple[list[str], list[str]]:
+    extra_unzipped_dir = bios_dir / "non_standard_extra_bios" / "unzipped"
+    extra_unzipped_dir.mkdir(parents=True, exist_ok=True)
+
+    new_files: list[str] = []
+    skipped_existing: list[str] = []
+
+    for source_path in extra_paths:
+        destination = extra_unzipped_dir / source_path.name
+
+        if destination.exists():
+            source_size, source_crc32, source_sha1 = _file_hashes(source_path)
+            dest_size, dest_crc32, dest_sha1 = _file_hashes(destination)
+
+            if (
+                source_size == dest_size
+                and source_crc32 == dest_crc32
+                and source_sha1 == dest_sha1
+            ):
+                skipped_existing.append(source_path.name)
+                continue
+
+        shutil.copy2(source_path, destination)
+        new_files.append(source_path.name)
+
+    return new_files, skipped_existing
+
+
+def rebuild_neogeo_extra_zip(bios_output_dir: str | os.PathLike[str]) -> Path | None:
+    bios_dir = Path(bios_output_dir)
+    loose_bios_dir = bios_dir / "unzipped"
+    extra_unzipped_dir = bios_dir / "non_standard_extra_bios" / "unzipped"
+    zip_path = bios_dir / NEOGEO_EXTRA_BIOS_ZIP_NAME
+
+    standard_files = [
+        name
+        for name in sorted(NEOGEO_BIOS_FILES)
+        if (loose_bios_dir / name).is_file()
+        and _same_confirmed_bios(loose_bios_dir / name, name)
+    ]
+
+    extra_files = [
+        path
+        for path in sorted(extra_unzipped_dir.glob("*"))
+        if path.is_file()
+    ]
+
+    if not extra_files:
+        if zip_path.exists():
+            zip_path.unlink()
+        return None
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as zf:
+        for name in standard_files:
+            zf.write(loose_bios_dir / name, arcname=name)
+
+        for path in extra_files:
+            zf.write(path, arcname=path.name)
+
+    return zip_path
+
 def _write_or_copy_match(match: BiosMatch, destination: Path) -> None:
     if match.data is not None:
         destination.write_bytes(match.data)
@@ -398,6 +503,8 @@ def collect_neogeo_bios(
 
     matches = scan_for_neogeo_bios(scan_root, game_bios_dir, master_bios_dir)
 
+    extra_paths = scan_for_non_standard_extra_bios(scan_root, game_bios_dir, master_bios_dir)
+
     game_new_files, game_replaced_files, game_skipped_existing, game_conflicts = _copy_matches_to_game_bios(
         matches,
         game_bios_dir,
@@ -405,16 +512,36 @@ def collect_neogeo_bios(
     game_zip_path = rebuild_neogeo_zip(game_bios_dir)
     game_zip_rebuilt = game_zip_path is not None
 
+    game_extra_new_files, game_extra_skipped_existing = _copy_extra_bios_files(
+        extra_paths,
+        game_bios_dir,
+    )
+    game_extra_zip_path = rebuild_neogeo_extra_zip(game_bios_dir)
+    game_extra_zip_rebuilt = game_extra_zip_path is not None
+
     master_new_files: list[str] = []
     master_skipped_existing: list[str] = []
     master_conflicts: list[str] = []
     master_zip_rebuilt = False
+    master_extra_new_files: list[str] = []
+    master_extra_skipped_existing: list[str] = []
+    master_extra_zip_rebuilt = False
 
     if master_bios_dir is not None:
         master_new_files, master_skipped_existing, master_conflicts = _copy_matches_to_master_bios(matches, master_bios_dir)
+
+        master_extra_new_files, master_extra_skipped_existing = _copy_extra_bios_files(
+            extra_paths,
+            master_bios_dir,
+        )
+
         if master_new_files:
             master_zip_path = rebuild_neogeo_zip(master_bios_dir)
             master_zip_rebuilt = master_zip_path is not None
+
+        if master_new_files or master_extra_new_files:
+            master_extra_zip_path = rebuild_neogeo_extra_zip(master_bios_dir)
+            master_extra_zip_rebuilt = master_extra_zip_path is not None
 
     result = BiosCollectResult(
         matches=matches,
@@ -423,10 +550,16 @@ def collect_neogeo_bios(
         game_skipped_existing=game_skipped_existing,
         game_conflicts=game_conflicts,
         game_zip_rebuilt=game_zip_rebuilt,
+        game_extra_new_files=game_extra_new_files,
+        game_extra_skipped_existing=game_extra_skipped_existing,
+        game_extra_zip_rebuilt=game_extra_zip_rebuilt,
         master_new_files=master_new_files,
         master_skipped_existing=master_skipped_existing,
         master_conflicts=master_conflicts,
         master_zip_rebuilt=master_zip_rebuilt,
+        master_extra_new_files=master_extra_new_files,
+        master_extra_skipped_existing=master_extra_skipped_existing,
+        master_extra_zip_rebuilt=master_extra_zip_rebuilt,
     )
 
     if verbose:
@@ -449,6 +582,9 @@ def _print_result(
     print(f"  Game BIOS files copied: {len(result.game_new_files)}")
     print(f"  Game BIOS files already present: {len(result.game_skipped_existing)}")
     print(f"  Game neogeo.zip rebuilt: {'yes' if result.game_zip_rebuilt else 'no'}")
+    print(f"  Game non-standard extra BIOS files copied: {len(result.game_extra_new_files)}")
+    print(f"  Game non-standard extra BIOS files already present: {len(result.game_extra_skipped_existing)}")
+    print(f"  Game neogeo_with_non_standard_extra_bios.zip rebuilt: {'yes' if result.game_extra_zip_rebuilt else 'no'}")
 
     if result.game_replaced_files:
         print("  Warning: replaced conflicting files in game BIOS folder:")
@@ -460,6 +596,10 @@ def _print_result(
         print(f"  Master BIOS new files added: {len(result.master_new_files)}")
         print(f"  Master BIOS files already present: {len(result.master_skipped_existing)}")
         print(f"  Master neogeo.zip rebuilt: {'yes' if result.master_zip_rebuilt else 'no'}")
+        print(f"  Master non-standard extra BIOS new files added: {len(result.master_extra_new_files)}")
+        print(f"  Master non-standard extra BIOS files already present: {len(result.master_extra_skipped_existing)}")
+        print(f"  Master neogeo_with_non_standard_extra_bios.zip rebuilt: {'yes' if result.master_extra_zip_rebuilt else 'no'}")
+
         if result.master_conflicts:
             print("  Warning: same-name conflicts in master BIOS folder were not overwritten:")
             for name in result.master_conflicts:
