@@ -16,10 +16,6 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Extraction notes:
-# This module was developed through source-file analysis, local testing,
-# hash comparison, and comparison with public Neo Geo extraction, emulation,
-# and preservation research.
 #
 # Extraction notes:
 # This module was developed through source-file analysis, local testing,
