@@ -16,7 +16,7 @@ Supported games are added through individual game modules in `project_files/game
 
 ## Currently Supported Games 
 
-The following games are supported (29 in total so far; 1 in progress):
+The following games are supported (30 in total so far):
 
 - 3 Count Bout
 - Alpha Mission II
@@ -29,7 +29,7 @@ The following games are supported (29 in total so far; 1 in progress):
 - Magician Lord
 - Metal Slug
 - Metal Slug 2
-- Metal Slug 3 (work in progress; not yet implemented)
+- **Metal Slug 3 (Now Available thanks to terminatorhex direct contribution, thnxs 😊)**
 - Metal Slug 4 (see Caution)
 - Metal Slug X
 - Mutation Nation
@@ -394,7 +394,7 @@ These references were especially useful for understanding The King of Fighters 2
 
 ### Special thanks to terminatorhex
 
-Special thanks to terminatorhex for the `mslug-rom-extractor` project and for the Metal Slug X JSON patch data reused in this project.
+Special thanks to terminatorhex for the `mslug-rom-extractor` project, for your help understanding your code a little better, for working on Metal Slug 3 with me, and for the Metal Slug X JSON patch data reused in this project.
 
 The Metal Slug X JSON patch data in this repository is directly reused from `mslug-rom-extractor`, with the file renamed for this project and credited here.
 
