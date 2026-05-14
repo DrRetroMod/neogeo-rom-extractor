@@ -211,7 +211,12 @@ def add_zip_entry(zf: zipfile.ZipFile, arcname: str, data: bytes, report: list[t
     report.append((arcname, len(data), crc32_hex(data)))
 
 
-def convert(source_dir: Path, output_zip: Path) -> list[tuple[str, int, str]]:
+def convert(
+    source_dir: Path,
+    output_zip: Path,
+    *,
+    show_progress: bool = False,
+) -> list[tuple[str, int, str]]:
     source_dir = source_dir.resolve()
     output_zip = output_zip.resolve()
 
@@ -226,8 +231,19 @@ def convert(source_dir: Path, output_zip: Path) -> list[tuple[str, int, str]]:
 
     report: list[tuple[str, int, str]] = []
 
+    total_steps = 12
+    step_index = 0
+
+    def progress(output_name: str) -> None:
+        nonlocal step_index
+        step_index += 1
+
+        if show_progress:
+            print(f"  [{step_index}/{total_steps}] Building {output_name}")
+
     with zipfile.ZipFile(output_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         # S: fixed/text data. The shell script takes this from s2.bin, not s1.bin.
+        progress(f"{ROM_ID}-s1d.s1")
         add_zip_entry(zf, f"{ROM_ID}-s1d.s1", read_exact_prefix(source_dir / "s2.bin", SIZE_S), report)
 
         # V: sound sample data.
@@ -236,18 +252,29 @@ def convert(source_dir: Path, output_zip: Path) -> list[tuple[str, int, str]]:
             raise ValueError(
                 f"PCM2 V output too small: expected 0x{SIZE_V_TOTAL:X}, got 0x{len(v_data):X}"
             )
+
+        progress(f"{ROM_ID}-v1.v1")
         add_zip_entry(zf, f"{ROM_ID}-v1.v1", v_data[0:SIZE_V_PART], report)
+
+        progress(f"{ROM_ID}-v2.v2")
         add_zip_entry(zf, f"{ROM_ID}-v2.v2", v_data[SIZE_V_PART:SIZE_V_TOTAL], report)
 
         # M: Z80 code. Shell script uses first 64 KiB from m1.bin, then 64 KiB of 0xFF padding.
         m_dec = read_exact_prefix(source_dir / "m1.bin", SIZE_M_PREFIX) + (b"\xFF" * SIZE_M_PAD)
         m_out = cmc50_m1_encrypt(m_dec)
+
+        progress(f"{ROM_ID}-m1.m1")
         add_zip_entry(zf, f"{ROM_ID}-m1.m1", m_out, report)
 
         # P: 68K program code. No CMC step in the Metal Slug 4 shell script.
         p_source = source_dir / "p1.bin"
+
+        progress(f"{ROM_ID}-ph1.p1")
         add_zip_entry(zf, f"{ROM_ID}-ph1.p1", read_exact_prefix(p_source, SIZE_P1), report)
+
         p_all = read_exact_prefix(p_source, SIZE_P1 + SIZE_P2)
+
+        progress(f"{ROM_ID}-ph2.sp2")
         add_zip_entry(zf, f"{ROM_ID}-ph2.sp2", p_all[SIZE_P1:SIZE_P1 + SIZE_P2], report)
 
         # C: sprites.
@@ -278,9 +305,14 @@ def convert(source_dir: Path, output_zip: Path) -> list[tuple[str, int, str]]:
             raise ValueError("Encrypted C odd/even split produced unexpected sizes")
 
         for index, offset in [(1, 0x0000000), (3, 0x0800000), (5, 0x1000000)]:
-            add_zip_entry(zf, f"{ROM_ID}-c{index}.c{index}", odd_enc[offset:offset + SIZE_C_PART], report)
+            output_name = f"{ROM_ID}-c{index}.c{index}"
+            progress(output_name)
+            add_zip_entry(zf, output_name, odd_enc[offset:offset + SIZE_C_PART], report)
+
         for index, offset in [(2, 0x0000000), (4, 0x0800000), (6, 0x1000000)]:
-            add_zip_entry(zf, f"{ROM_ID}-c{index}.c{index}", even_enc[offset:offset + SIZE_C_PART], report)
+            output_name = f"{ROM_ID}-c{index}.c{index}"
+            progress(output_name)
+            add_zip_entry(zf, output_name, even_enc[offset:offset + SIZE_C_PART], report)
 
     return sorted(report, key=lambda item: item[0])
 
@@ -307,6 +339,7 @@ def run_custom_converter(
     report = convert(
         source_dir=source_folder,
         output_zip=output_zip,
+        show_progress=True,
     )
 
     log.append("  Created ZIP contents:")

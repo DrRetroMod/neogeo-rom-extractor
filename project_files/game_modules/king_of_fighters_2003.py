@@ -223,7 +223,12 @@ def add_zip_entry(zf: zipfile.ZipFile, arcname: str, data: bytes, report: list[t
     report.append((arcname, len(data), crc32_hex(data)))
 
 
-def convert(source_dir: Path, output_zip: Path) -> list[tuple[str, int, str]]:
+def convert(
+    source_dir: Path,
+    output_zip: Path,
+    *,
+    show_progress: bool = False,
+) -> list[tuple[str, int, str]]:
     source_dir = source_dir.resolve()
     output_zip = output_zip.resolve()
 
@@ -238,17 +243,33 @@ def convert(source_dir: Path, output_zip: Path) -> list[tuple[str, int, str]]:
 
     report: list[tuple[str, int, str]] = []
 
+    total_steps = 14
+    step_index = 0
+
+    def progress(output_name: str) -> None:
+        nonlocal step_index
+        step_index += 1
+
+        if show_progress:
+            print(f"  [{step_index}/{total_steps}] Building {output_name}")
+
     with zipfile.ZipFile(output_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         # V: sound data
         v_data = pcm2_unswap((source_dir / "v1.bin").read_bytes(), value=5)
         if len(v_data) < SIZE_V_TOTAL:
             raise ValueError(f"PCM2 V output too small: expected 0x{SIZE_V_TOTAL:X}, got 0x{len(v_data):X}")
+
+        progress(f"{ROM_ID}-v1c.v1")
         add_zip_entry(zf, f"{ROM_ID}-v1c.v1", v_data[0:SIZE_V_PART], report)
+
+        progress(f"{ROM_ID}-v2c.v2")
         add_zip_entry(zf, f"{ROM_ID}-v2c.v2", v_data[SIZE_V_PART:SIZE_V_TOTAL], report)
 
         # M: Z80 code
         m_data = read_exact_prefix(source_dir / "m1.bin", SIZE_M)
         m_out = cmc50_m1_encrypt(m_data)
+
+        progress(f"{ROM_ID}-m1k.m1")
         add_zip_entry(zf, f"{ROM_ID}-m1k.m1", m_out, report)
 
         # P: 68K code
@@ -256,9 +277,16 @@ def convert(source_dir: Path, output_zip: Path) -> list[tuple[str, int, str]]:
         p_enc_data = kof2003_p_encrypt(p_source)
         if len(p_enc_data) < SIZE_P_SOURCE:
             raise ValueError(f"PVC P output too small: expected 0x{SIZE_P_SOURCE:X}, got 0x{len(p_enc_data):X}")
+
         p12 = p_enc_data[:SIZE_P12]
+
+        progress(f"{ROM_ID}-p3k.p3")
         add_zip_entry(zf, f"{ROM_ID}-p3k.p3", p_enc_data[SIZE_P12:SIZE_P12 + SIZE_P3], report)
+
+        progress(f"{ROM_ID}-p1k.p1")
         add_zip_entry(zf, f"{ROM_ID}-p1k.p1", split_4_take_2(p12, 0), report)
+
+        progress(f"{ROM_ID}-p2k.p2")
         add_zip_entry(zf, f"{ROM_ID}-p2k.p2", split_4_take_2(p12, 2), report)
 
         # C: sprites
@@ -267,17 +295,24 @@ def convert(source_dir: Path, output_zip: Path) -> list[tuple[str, int, str]]:
         crom = interleave_odd_even(odd, even)
         if len(crom) != SIZE_C_TOTAL:
             raise ValueError(f"CROM intermediate size mismatch: expected 0x{SIZE_C_TOTAL:X}, got 0x{len(crom):X}")
+
         c_enc = cmc50_gfx_encrypt(crom, extra_xor=0x9D)
         if len(c_enc) < SIZE_C_TOTAL:
             raise ValueError(f"CMC50 C output too small: expected 0x{SIZE_C_TOTAL:X}, got 0x{len(c_enc):X}")
+
         odd_enc, even_enc = split_odd_even(c_enc[:SIZE_C_TOTAL])
         if len(odd_enc) != SIZE_C_HALF or len(even_enc) != SIZE_C_HALF:
             raise ValueError("Encrypted C odd/even split produced unexpected sizes")
 
         for index, offset in [(1, 0x0000000), (3, 0x0800000), (5, 0x1000000), (7, 0x1800000)]:
-            add_zip_entry(zf, f"{ROM_ID}-c{index}k.c{index}", odd_enc[offset:offset + SIZE_C_PART], report)
+            output_name = f"{ROM_ID}-c{index}k.c{index}"
+            progress(output_name)
+            add_zip_entry(zf, output_name, odd_enc[offset:offset + SIZE_C_PART], report)
+
         for index, offset in [(2, 0x0000000), (4, 0x0800000), (6, 0x1000000), (8, 0x1800000)]:
-            add_zip_entry(zf, f"{ROM_ID}-c{index}k.c{index}", even_enc[offset:offset + SIZE_C_PART], report)
+            output_name = f"{ROM_ID}-c{index}k.c{index}"
+            progress(output_name)
+            add_zip_entry(zf, output_name, even_enc[offset:offset + SIZE_C_PART], report)
 
     return sorted(report, key=lambda item: item[0])
 
@@ -305,6 +340,7 @@ def run_custom_converter(
     report = convert(
         source_dir=source_folder,
         output_zip=output_zip,
+        show_progress=True,
     )
 
     log.append("  Created ZIP contents:")
