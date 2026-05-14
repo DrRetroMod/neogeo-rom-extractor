@@ -46,14 +46,11 @@ Standalone examples:
 """
 
 # Extraction notes:
-# This module was developed through direct help of terminatorhex's code and personal help with understanding some of their code.
-# It was also helped in part by source-file analysis, local testing,
-# hash comparison, and comparison with public Neo Geo extraction, emulation,
-# and preservation research.
+# This module was developed by translating the supplied convert_mslug3_dotemu.py
+# flow and replacing the available external helper steps with Python-side code.
 #
-# Metal Slug 3 extraction behaviour was informed mostly by mslug-rom-extractor
-# by terminatorhex:
-# https://github.com/terminatorhex/mslug-rom-extractor
+# Remaining external helper:
+# - none for CMC; CMC42 is handled by neogeo/cmc.py.
 #
 # See README.md -> Credits and Acknowledgements for full project-wide credits.
 
@@ -65,10 +62,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-try:
-    from neogeo.cmc import MSLUG3_GFX_KEY, cmc42_gfx_encrypt
-except ImportError:
-    from cmc import MSLUG3_GFX_KEY, cmc42_gfx_encrypt
+from neogeo.cmc import MSLUG3_GFX_KEY, cmc42_gfx_encrypt
 
 ROM_ID = "256"
 ZIP_NAME = "mslug3"
@@ -351,6 +345,7 @@ def encrypt_crom_cmc42(crom: bytes) -> bytes:
         raise ValueError(f"CROM intermediate size mismatch: expected 0x{SIZE_C_TOTAL:X}, got 0x{len(crom):X}")
     return cmc42_gfx_encrypt(crom, extra_xor=MSLUG3_GFX_KEY)
 
+
 def build_crom_outputs(source_dir: Path, module_folder: Path | None, explicit_neo_cmc: Path | None = None, progress: bool = False) -> dict[str, bytes]:
     # Important correction:
     # tiles_reencode() from mslug-rom-extractor.py already represents the Dotemu
@@ -419,7 +414,7 @@ def build_roms(source_dir: Path, module_folder: Path | None = None, explicit_neo
     output["256-v3.v3"] = v_data[0x800000:0xC00000]
     output["256-v4.v4"] = v_data[0xC00000:0x1000000]
 
-    # C: replaces tileswap.exe and tiles2crom.exe; keeps isolated neo-cmc CMC42 step.
+    # C: replaces tileswap.exe, tiles2crom.exe, and neo-cmc.exe using Python helpers.
     if progress:
         print("  [C] Building C ROMs", flush=True)
     output.update(build_crom_outputs(source_dir, module_folder, explicit_neo_cmc, progress=progress))
